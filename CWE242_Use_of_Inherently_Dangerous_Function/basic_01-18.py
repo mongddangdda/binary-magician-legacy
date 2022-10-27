@@ -1,10 +1,15 @@
-import os, sys
+import os
+import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from binaryninja import *
-from utils.evaluation import get_all_files_from_path, get_answer, evaluate_result
+from binaryninja.binaryview import BinaryViewType
+from binaryninja.function import Function
+from utils.runner import Runner
+from utils.utils import get_all_files_from_path
 
-def solution(bv: BinaryViewType) -> list:
+
+def solution(bv: BinaryViewType) -> list[Function]:
 
     result = [] # spicious function list
 
@@ -27,12 +32,9 @@ def solution(bv: BinaryViewType) -> list:
     return result
 
 if __name__ == '__main__':
-    binary_path = '/Users/ch4rli3kop/binary-nomaj/Juliet_1.3/testcases/CWE242_Use_of_Inherently_Dangerous_Function/'
-    files = get_all_files_from_path(binary_path)
+    binary_path = '/Users/ch4rli3kop/binary-nomaj/Juliet_amd64/testcases/CWE242_Use_of_Inherently_Dangerous_Function/'
+    file_list = get_all_files_from_path(binary_path)
 
-    for file in files:
-        bv = binaryview.BinaryViewType.get_view_of_file(file)
-        result = solution(bv)
-        answer = get_answer(bv)
-        evaluate_result(result, answer)
-        
+    runner = Runner(solution, file_list)
+    runner.run()
+    
