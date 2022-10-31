@@ -6,7 +6,7 @@ from binaryninja.architecture import Architecture
 from utils.utils import is_cpp_binary
 
 class Runner:
-    def __init__(self, solution, file_list=[]) -> None:
+    def __init__(self, solution=None, file_list=[]) -> None:
         self.solution = solution
         self.file_list = file_list
         self.files_good = dict()
@@ -35,6 +35,7 @@ class Runner:
             result = self.solution(bv)
             answer = self.get_answer(bv)
             self.evaluation(file, result, answer)
+            bv.file.close()
         self.show_result()
 
     def evaluation(self, file: str, result: list[Function], answer: list[Function]):
