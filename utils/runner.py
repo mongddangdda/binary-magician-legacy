@@ -1,3 +1,4 @@
+from pathlib import Path
 import re
 from binaryninja.binaryview import BinaryViewType
 from binaryninja.function import Function
@@ -6,7 +7,7 @@ from binaryninja.architecture import Architecture
 from utils.utils import is_cpp_binary
 
 class Runner:
-    def __init__(self, solution, file_list=[]) -> None:
+    def __init__(self, solution=None, file_list=[]) -> None:
         self.solution = solution
         self.file_list = file_list
         self.files_good = dict()
@@ -24,17 +25,18 @@ class Runner:
             exit()
 
     def run(self) -> None:
-        
+        file: Path
         for file in self.file_list:
-            print(f'{file} is running... ')
-            bv = BinaryViewType.get_view_of_file(file)
+            print(f'{file.name} is running... ')
+            bv = BinaryViewType.get_view_of_file(file.absolute())
             if is_cpp_binary(bv):
-                self.cpp.append(file)
+                self.cpp.append(file.name)
                 continue
 
             result = self.solution(bv)
             answer = self.get_answer(bv)
-            self.evaluation(file, result, answer)
+            self.evaluation(file.name, result, answer)
+            bv.file.close()
         self.show_result()
 
     def evaluation(self, file: str, result: list[Function], answer: list[Function]):
@@ -68,10 +70,15 @@ class Runner:
         # FIXME: this code work correctly only when binary has one vulnerability
         # C
         bad_functions = [func for func in bv.functions if re.match('_?CWE.*badSink', func.name)]
+
         # when call like 54b_badSink -> 54c_badSink -> 54d_badSink ... it return max badSink function
         if len(bad_functions) > 1:
             bad_functions = { func.name : func for func in bv.functions if re.match('_?CWE.*badSink', func.name)}
             bad_functions = [ bad_functions[max(bad_functions.keys())] ]
+
+        # some binary has just "badSink" function
+        if len(bad_functions) < 1:
+            bad_functions = [func for func in bv.functions if re.match('badSink', func.name)]
 
         if len(bad_functions) < 1:
             bad_functions = [func for func in bv.functions if re.match('_?CWE.*bad$', func.name)]
