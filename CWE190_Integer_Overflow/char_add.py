@@ -25,6 +25,9 @@ def solution(bv: BinaryViewType) -> list[Function]:
             if inst.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
                 #print(inst)
                 if inst.src.operation == MediumLevelILOperation.MLIL_ADD:
+                    # FIXME: Range의 경우가 path에 영향을 받을 때, 현재 path를 구분하지 못하므로 false positive가 많음.
+
+                    # TODO: a = 상수 + 상수 형태는 바이너리 닌자 LLIL -> MLIL 과정에서 a = value 형태로 최적화됨.
 
                     # FIXME: 우항이 상수일 때 추가
                     if type(inst.src.right) == MediumLevelILConst:
@@ -60,51 +63,48 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             
                             b_type = pv_b.type
                             c_type = pv_c.type
-                            if is_in_ranges(b_type):
-                                # FIXME: Range의 경우가 path에 영향을 받을 때, 현재 path를 구분하지 못하므로 false positive가 많음.
+
+                            if b_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
                                 pv_b = pv_b.ranges[0]
                                 bi = Int('bi')
                                 solver.add(b == pv_b.start + bi * pv_b.step)
                                 solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
+                            elif b_type in { RegisterValueType.InSetOfValues }:
+                                solver.add(Or([b == value for value in pv_b.values]))
 
-                            if is_in_ranges(b_type):
-                                # FIXME: Range의 경우가 path에 영향을 받을 때, 현재 path를 구분하지 못하므로 false positive가 많음.
+                            if c_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
                                 pv_c = pv_c.ranges[0]
                                 ci = Int('ci')
                                 solver.add(c == pv_c.start + ci * pv_c.step)
                                 solver.add(0 <= ci, ci <= (pv_c.end - pv_c.start)/pv_c.step)
+                            elif c_type in { RegisterValueType.InSetOfValues }:
+                                solver.add(Or([c == value for value in pv_c.values]))
 
-                            if is_in_ranges(b_type) and is_in_ranges(c_type):
+                            if b_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues} and \
+                                c_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues}:
                                 solver.push()
                                 solver.add( b+c < pv_a.start )
                                 if solver.check() == sat:
-                                    print('integer overflow!')
+                                    #print('integer overflow!')
                                     result.append(func)
                                 else:
                                     solver.pop()
                                     solver.add( b+c > pv_a.end )
                                     if solver.check() == sat:
-                                        print('integer overflow!')
+                                        #print('integer overflow!')
                                         result.append(func)
 
-                            # if is_in_ranges(b_type) and is_in_ranges(c_type):
-                            #     if pv_a.ranges[0].end < pv_b.ranges[0].end + pv_c.ranges[0].end or \
-                            #         pv_a.ranges[0].start > pv_b.ranges[0].start + pv_c.ranges[0].start: # integer underflow
-                            #         #print('integer overflow!')
-                            #         result.append(func)
-                            
-                            # TODO: InSetOfValue
-                            
-
-                            # Is there the case that X = InSetOfValues + RangeValue?
-                            elif pv_b.type == RegisterValueType.InSetOfValues and \
-                                pv_c.type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue}:
-                                raise
-                                
-                            elif pv_b.type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue} and \
-                                pv_c.type == RegisterValueType.InSetOfValues :
-                                raise
-
+                            # Is other RegisterValueType used in here?
+                            if b_type in {RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
+                                RegisterValueType.EntryValue, RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
+                                    RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
+                                        RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue} or  \
+                                            c_type in {RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
+                                RegisterValueType.EntryValue, RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
+                                    RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
+                                        RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue}:
+                                continue
+          
     return result
 
 if __name__ == '__main__':
