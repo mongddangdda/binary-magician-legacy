@@ -40,27 +40,30 @@ class Runner:
         self.show_result()
 
     def evaluation(self, file: str, result: list[Function], answer: list[Function]):
+        RED = '\033[1;31;48m'
+        END = '\033[1;37;0m'
         # evaluate results
         # TODO: make comparing result with the real bad function more clear (ex. calculate f1-score?)
         result.sort()
         answer.sort()
         #print(file)
         if result == answer:
-            print(f'good!')
+            print(f'                                                                       good!')
             self.files_good[file] = result
             return
 
         for func in answer:
             if func not in result:
-                print(f'you cant detect the bad function at {func.start:#x}')
+                print(f'{RED}                                                                       you cant detect the bad function at {func.start:#x}{END}')
                 if file not in self.files_missed:
                     self.files_missed[file] = [func]
                 else:
                     self.files_missed[file].append(func)
+                return
 
         for func in result:
             if func not in answer:
-                print(f'false positive at {func.start:#x}')
+                print(f'                                                                       false positive at {func.start:#x}')
                 if file not in self.files_fp:
                     self.files_fp[file] = [func]
                 else:
@@ -134,10 +137,10 @@ class Runner:
         missed = len(self.files_missed)
         fp = len(self.files_fp)
         print(f'cpp binaries : {len(self.cpp)}')
-        print(f'result [File]: \ngood: {good}/{total} \tmissed: {missed}/{total} \tfalse positive: {fp}/{total}')
+        print(f'result [File]: \ndetect: {good+fp}/{total} (good: {good}|false positive: {fp}) \tmissed: {missed}/{total}')
 
-        good = sum([len(self.files_good[file]) for file in self.files_good])
-        missed = sum([len(self.files_missed[file]) for file in self.files_missed])
-        fp = sum([len(self.files_fp[file]) for file in self.files_fp])
-        total = good + missed + fp
-        print(f'result [Vulnerabilities]: \ngood: {good}/{total} \tmissed: {missed}/{total} \tfalse positive: {fp}/{total}')
+        # good = sum([len(self.files_good[file]) for file in self.files_good])
+        # missed = sum([len(self.files_missed[file]) for file in self.files_missed])
+        # fp = sum([len(self.files_fp[file]) for file in self.files_fp])
+        # total = good + missed + fp
+        # print(f'result [Vulnerabilities]: \ndetect: {good+fp}/{total}(good: {good}|false positive: {fp}) \tmissed: {missed}/{total}')
