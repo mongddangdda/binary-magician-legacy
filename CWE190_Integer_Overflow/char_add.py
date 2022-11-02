@@ -59,7 +59,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         if b_type in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
                             RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
                                 RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue):
+                                    RegisterValueType.StackFrameOffset):
                             continue
 
                         if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
@@ -69,7 +69,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
                         elif b_type is RegisterValueType.InSetOfValues :
                             solver.add(Or([b == value for value in pv_b.values]))
-                        elif b_type is RegisterValueType.EntryValue :
+                        elif b_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ):
                             # FIXME: This is argument value
                             pv_b = return_a_range(b_value.type.get_string())
                             if pv_b is None:
@@ -114,7 +114,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         if any( i in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
                             RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
                                 RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue) for i in (b_type, c_type)):
+                                    RegisterValueType.StackFrameOffset) for i in (b_type, c_type)):
                             continue
 
                         if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
@@ -124,7 +124,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
                         elif b_type in { RegisterValueType.InSetOfValues }:
                             solver.add(Or([b == value for value in pv_b.values]))
-                        elif b_type is RegisterValueType.EntryValue :
+                        elif b_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ):
                             # FIXME: This is argument value
                             pv_b = return_a_range(b_value.type.get_string())
                             if pv_b is None:
@@ -138,7 +138,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             solver.add(0 <= ci, ci <= (pv_c.end - pv_c.start)/pv_c.step)
                         elif c_type is RegisterValueType.InSetOfValues:
                             solver.add(Or([c == value for value in pv_c.values]))
-                        elif c_type is RegisterValueType.EntryValue :
+                        elif c_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue) :
                             # FIXME: This is argument value
                             pv_c = return_a_range(c_value.type.get_string())
                             if pv_c is None:
@@ -184,7 +184,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         if b_type in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
                             RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
                                 RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue):
+                                    RegisterValueType.StackFrameOffset):
                             continue
 
                         if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
@@ -194,7 +194,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
                         elif b_type is RegisterValueType.InSetOfValues:
                             solver.add(Or([b == value for value in pv_b.values]))
-                        elif b_type is RegisterValueType.EntryValue :
+                        elif b_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ) :
                             # FIXME: This is argument value
                             pv_b = return_a_range(b_value.type.get_string())
                             if pv_b is None:
@@ -250,7 +250,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
                         elif b_type is RegisterValueType.InSetOfValues :
                             solver.add(Or([b == value for value in pv_b.values]))
-                        elif b_type is RegisterValueType.EntryValue :
+                        elif b_type is ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ) :
                             # FIXME: This is argument value
                             pv_b = return_a_range(b_value.type.get_string())
                             if pv_b is None:
@@ -264,7 +264,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                             solver.add(0 <= ci, ci <= (pv_c.end - pv_c.start)/pv_c.step)
                         elif c_type is RegisterValueType.InSetOfValues :
                             solver.add(Or([c == value for value in pv_c.values]))
-                        elif c_type is RegisterValueType.EntryValue :
+                        elif c_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ) :
                             # FIXME: This is argument value
                             pv_c = return_a_range(c_value.type.get_string())
                             if pv_c is None:
