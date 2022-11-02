@@ -21,6 +21,8 @@ def return_a_range(type: str):
         return PossibleValueSet.signed_range_value([ValueRange(-128, 127, 1)]).ranges[0]
     elif type == 'short':
         return PossibleValueSet.signed_range_value([ValueRange(-0x1000, 0xffff, 1)]).ranges[0]
+    elif type == 'int16_t':
+        return PossibleValueSet.signed_range_value([ValueRange(-0x1000, 0xffff, 1)]).ranges[0]
     elif type == 'int32_t':
         return PossibleValueSet.signed_range_value([ValueRange(-0x10000000, 0xffffffff, 1)]).ranges[0]
     elif type == 'int64_t':
@@ -170,7 +172,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
 
                     # SSAVariable * 상수
                     if type(inst.src.right) == MediumLevelILConst and type(inst.src.left) == MediumLevelILVarSsa:
-                        print(f'{func.start:#x}', inst)
+                        #print(f'{func.start:#x}', inst)
                         # a = b + c(constant value)
                         a = inst.dest
                         b_value = inst.src.left.src
@@ -223,7 +225,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
 
                     # Multiply SSAVariable * SSaVariable
                     elif type(inst.src.right) == MediumLevelILVarSsa and type(inst.src.left) == MediumLevelILVarSsa:
-                        # print(f'{func.start:#x}', inst)
+                        #print(f'{func.start:#x}', inst)
                         # a = b + c
                         a = inst.dest
                         b_value = inst.src.left.src
@@ -248,7 +250,7 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         if any( i in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
                             RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
                                 RegisterValueType.LookupTableValue, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue) for i in (b_type, c_type)):
+                                    RegisterValueType.StackFrameOffset) for i in (b_type, c_type)):
                             continue
 
                         if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
