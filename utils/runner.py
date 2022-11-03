@@ -1,3 +1,16 @@
+'''
+
+Runner Class:
+    각 바이너리를 BinaryHalper 객체로 관리하며, 사용자의 solution 함수로 찾은 result와 실제 취약점인 answer를 비교하여
+    통계를 내주는 역할을 수행함.
+
+    주요작업
+    - 각 바이너리를 BinaryHelper 객체로 매핑함
+    - result와 answer를 가져와 비교함
+
+'''
+
+
 from pathlib import Path
 import re
 from binaryninja.binaryview import BinaryViewType
@@ -6,14 +19,17 @@ from binaryninja.demangle import *
 from binaryninja.architecture import Architecture
 from utils.utils import is_cpp_binary
 
+from utils.binaryHelper import *
+
 class Runner:
     def __init__(self, solution=None, file_list=[]) -> None:
         self.solution = solution
-        self.file_list = file_list
+        self.file_list = file_list # TODO: {file: (result, answer)} 형태로
         self.files_good = dict()
         self.files_missed = dict()
         self.files_fp = dict() # false positive
         self.cpp = []
+        self.options = 0 # c_only = 0, cpp_only = 1, all = 2
         self._check_args()
     
     def _check_args(self) -> None:
@@ -24,19 +40,28 @@ class Runner:
             print(f'run with file list!')
             exit()
 
-    def run(self) -> None:
+    def run(self, c_only = True, cpp_only = False, all = False ) -> None:
+        if cpp_only:
+            c_only = False
+            self.options = 1
+        elif all:
+            self.options = 2
+
         file: Path
         for file in self.file_list:
             print(f'{file.name} is running... ')
-            bv = BinaryViewType.get_view_of_file(file.absolute())
-            if is_cpp_binary(bv):
-                self.cpp.append(file.name)
+            binary = CBinaryHelper(file)
+            if binary.is_cpp and ( not c_only or all ):
+                binary = CPPBinaryHelper(file)
+                self.cpp.append(file)
+            elif cpp_only:
+                del binary
                 continue
-
-            result = self.solution(bv)
-            answer = self.get_answer(bv)
+            
+            result = binary.run(self.solution)
+            answer = binary.get_answer()
             self.evaluation(file.name, result, answer)
-            bv.file.close()
+            del binary
         self.show_result()
 
     def evaluation(self, file: str, result: list[Function], answer: list[Function]):
@@ -69,74 +94,18 @@ class Runner:
                 else:
                     self.files_fp[file].append(func)
 
-    def get_answer(self, bv: BinaryViewType) -> list[Function]:
-        # FIXME: this code work correctly only when binary has one vulnerability
-        # C
-        bad_functions = [func for func in bv.functions if re.match('_?CWE.*badSink', func.name)]
-
-        # when call like 54b_badSink -> 54c_badSink -> 54d_badSink ... it return max badSink function
-        if len(bad_functions) > 1:
-            bad_functions = { func.name : func for func in bv.functions if re.match('_?CWE.*badSink', func.name)}
-            bad_functions = [ bad_functions[max(bad_functions.keys())] ]
-
-        # some binary has just "badSink" function
-        if len(bad_functions) < 1:
-            bad_functions = [func for func in bv.functions if re.match('badSink', func.name)]
-
-        if len(bad_functions) < 1:
-            bad_functions = [func for func in bv.functions if re.match('_?CWE.*bad$', func.name)]
-                
-        '''
-        # TODO: move to the new Binary class
-        # TODO: identify C++ binary and whether it is gnu3 or ms
-        # C++ gnu3
-        if len(bad_functions) < 1:
-            # when gnu3 (linux)
-            for func in bv.functions:
-                if func.name[:2] == '_Z':
-                    # it may be mangled name
-                    name = demangle_gnu3(bv.arch, func.name)[1]
-                    func_name = get_qualified_name(name)
-                    if re.match('_?CWE.*badSink', func_name):
-                        bad_functions.append(func)
-        if len(bad_functions) < 1:
-            # when gnu3 (linux)
-            for func in bv.functions:
-                if func.name[:2] == '_Z':
-                    # it may be mangled name
-                    name = demangle_gnu3(bv.arch, func.name)[1]
-                    func_name = get_qualified_name(name)
-                    if re.match('_?CWE.*bad$', func_name):
-                        bad_functions.append(func)
-        # C++ ms
-        if len(bad_functions) < 1:
-            # when ms
-            for func in bv.functions:
-                if func.name[:2] == '_Z':
-                    # it may be mangled name
-                    name = demangle_ms(bv.arch, func.name)[1]
-                    func_name = get_qualified_name(name)
-                    if re.match('_?CWE.*badSink', func_name):
-                        bad_functions.append(func)
-        if len(bad_functions) < 1:
-            # when ms
-            for func in bv.functions:
-                if func.name[:2] == '_Z':
-                    # it may be mangled name
-                    name = demangle_ms(bv.arch, func.name)[1]
-                    func_name = get_qualified_name(name)
-                    if re.match('_?CWE.*bad$', func_name):
-                        bad_functions.append(func)
-        '''
-
-        return bad_functions
-
     def show_result(self) -> None:
-        total = len(self.file_list) - len(self.cpp)
+        if self.options == 0:
+            total = len(self.file_list) - len(self.cpp)
+        elif self.options == 1:
+            total = len(self.cpp)
+        elif self.options == 2:
+            total = len(self.file_list)
+
         good = len(self.files_good)
         missed = len(self.files_missed)
         fp = len(self.files_fp)
-        print(f'cpp binaries : {len(self.cpp)}')
+        print(f'c : {len(self.file_list)-len(self.cpp)}\tcpp : {len(self.cpp)}')
         print(f'result [File]: \ndetect: {good+fp}/{total} (good: {good}|false positive: {fp}) \tmissed: {missed}/{total}')
 
         # good = sum([len(self.files_good[file]) for file in self.files_good])

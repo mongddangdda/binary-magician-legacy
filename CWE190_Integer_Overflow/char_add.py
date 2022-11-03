@@ -12,7 +12,7 @@ from utils.utils import get_all_files_from_path, get_matched_files_from_path
 from z3 import *
 
 def is_in_ranges(type):
-    if type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+    if type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
         return True
     return False
 
@@ -20,6 +20,8 @@ def return_a_range(type: str):
     if type == 'char':
         return PossibleValueSet.signed_range_value([ValueRange(-128, 127, 1)]).ranges[0]
     elif type == 'short':
+        return PossibleValueSet.signed_range_value([ValueRange(-0x1000, 0xffff, 1)]).ranges[0]
+    elif type == 'int16_t':
         return PossibleValueSet.signed_range_value([ValueRange(-0x1000, 0xffff, 1)]).ranges[0]
     elif type == 'int32_t':
         return PossibleValueSet.signed_range_value([ValueRange(-0x10000000, 0xffffffff, 1)]).ranges[0]
@@ -39,21 +41,15 @@ def solution(bv: BinaryViewType) -> list[Function]:
                     # FIXME: Range의 경우가 path에 영향을 받을 때, 현재 path를 구분하지 못하므로 false positive가 많음.
                     # TODO: a = 상수 + 상수 형태는 바이너리 닌자 LLIL -> MLIL 과정에서 a = value 형태로 최적화됨. 해당 경우 LLIL로 탐지해야 함.
 
-                    if type(inst.src.right) == MediumLevelILConst:
+                    # Add : SSaVariable + 상수
+                    if type(inst.src.right) == MediumLevelILConst and type(inst.src.left) == MediumLevelILVarSsa:
                         # a = b + c(constant value)
                         a = inst.dest
-                        b = inst.src.left.src
+                        b_value = inst.src.left.src
                         c = inst.src.right.constant
 
-                        pv_a = inst.get_ssa_var_possible_values(a)
-                        pv_b = inst.get_ssa_var_possible_values(b)
-
-                        # if a.var.type.get_string() == 'char':
-                        #     pv_a = pv_a.signed_range_value([ValueRange(-128, 127, 1)])
-                        #     pv_a = pv_a.ranges[0]
-                            
+                        pv_b = inst.get_ssa_var_possible_values(b_value)
                         pv_a = return_a_range(a.type.get_string())
-
                         if pv_a is None:
                             continue
 
@@ -61,48 +57,55 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         b = Int('b')                            
                         b_type = pv_b.type
 
-                        if b_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+                        # TODO: handle this types
+                        if b_type in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
+                            RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
+                                RegisterValueType.LookupTableValue, RegisterValueType.ReturnAddressValue, \
+                                    RegisterValueType.StackFrameOffset):
+                            continue
+
+                        if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
                             pv_b = pv_b.ranges[0]
                             bi = Int('bi')
                             solver.add(b == pv_b.start + bi * pv_b.step)
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
-                        elif b_type in { RegisterValueType.InSetOfValues }:
+                        elif b_type is RegisterValueType.InSetOfValues :
                             solver.add(Or([b == value for value in pv_b.values]))
+                        elif b_type is RegisterValueType.NotInSetOfValues :
+                            solver.add(Or([b != value for value in pv_b.values]))
+                        elif b_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ):
+                            # FIXME: This is argument value
+                            pv_b = return_a_range(b_value.type.get_string())
+                            if pv_b is None:
+                                continue
+                            solver.add(pv_b.start <= b, b <= pv_b.end)
 
-                        if b_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues}:
-                            solver.push()
-                            solver.add( b+c < pv_a.start )
+                        solver.push()
+                        solver.add( b+c < pv_a.start )
+                        if solver.check() == sat:
+                            # print('integer overflow!')
+                            result.append(func)
+                        else:
+                            solver.pop()
+                            solver.add( b+c > pv_a.end )
                             if solver.check() == sat:
-                                #print('integer overflow!')
+                                # print('integer overflow!')
                                 result.append(func)
-                            else:
-                                solver.pop()
-                                solver.add( b+c > pv_a.end )
-                                if solver.check() == sat:
-                                    #print('integer overflow!')
-                                    result.append(func)
 
 
-                    elif type(inst.src.right) == MediumLevelILVarSsa:
+                    # Add : SSaVariable + SSaVariable
+                    elif type(inst.src.right) == MediumLevelILVarSsa and type(inst.src.left) == MediumLevelILVarSsa:
                         # a = b + c
                         a = inst.dest
-                        b = inst.src.left.src
-                        c = inst.src.right.src
+                        b_value = inst.src.left.src
+                        c_value = inst.src.right.src
                         #print(a, b, c)
-                        pv_a = inst.get_ssa_var_possible_values(a)
-                        pv_b = inst.get_ssa_var_possible_values(b)
-                        pv_c = inst.get_ssa_var_possible_values(c)
+                        pv_b = inst.get_ssa_var_possible_values(b_value)
+                        pv_c = inst.get_ssa_var_possible_values(c_value)
 
-                        # if a.var.type.get_string() == 'char':
-                        #     pv_a = pv_a.signed_range_value([ValueRange(-128, 127, 1)])
-                        #     pv_a = pv_a.ranges[0]
-                        #     #print(f'{func.start:#x}', inst, pv_a, pv_b, pv_c)
-                        # elif a.var.type.get_string() == 'int64_t':
                         pv_a = return_a_range(a.type.get_string())
-
                         if pv_a is None:
                             continue
-
 
                         solver = Solver()
                         b = Int('b')
@@ -111,66 +114,71 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         b_type = pv_b.type
                         c_type = pv_c.type
 
-                        if b_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+                        # TODO: handle this types
+                        if any( i in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
+                            RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
+                                RegisterValueType.LookupTableValue, RegisterValueType.ReturnAddressValue, \
+                                    RegisterValueType.StackFrameOffset) for i in (b_type, c_type)):
+                            continue
+
+                        if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
                             pv_b = pv_b.ranges[0]
                             bi = Int('bi')
                             solver.add(b == pv_b.start + bi * pv_b.step)
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
                         elif b_type in { RegisterValueType.InSetOfValues }:
                             solver.add(Or([b == value for value in pv_b.values]))
+                        elif b_type in { RegisterValueType.NotInSetOfValues }:
+                            solver.add(Or([b != value for value in pv_b.values]))
+                        elif b_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ):
+                            # FIXME: This is argument value
+                            pv_b = return_a_range(b_value.type.get_string())
+                            if pv_b is None:
+                                continue
+                            solver.add(pv_b.start <= b, b <= pv_b.end)
 
-                        if c_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+                        if c_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
                             pv_c = pv_c.ranges[0]
                             ci = Int('ci')
                             solver.add(c == pv_c.start + ci * pv_c.step)
                             solver.add(0 <= ci, ci <= (pv_c.end - pv_c.start)/pv_c.step)
-                        elif c_type in { RegisterValueType.InSetOfValues }:
+                        elif c_type is RegisterValueType.InSetOfValues:
                             solver.add(Or([c == value for value in pv_c.values]))
+                        elif c_type is RegisterValueType.NotInSetOfValues:
+                            solver.add(Or([c != value for value in pv_c.values]))
+                        elif c_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue) :
+                            # FIXME: This is argument value
+                            pv_c = return_a_range(c_value.type.get_string())
+                            if pv_c is None:
+                                continue
+                            solver.add(pv_c.start <= c, c <= pv_c.end)
 
-                        if b_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues} and \
-                            c_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues}:
-                            solver.push()
-                            solver.add( b+c < pv_a.start )
+                        solver.push()
+                        solver.add( b+c < pv_a.start )
+                        if solver.check() == sat:
+                            # print('integer overflow!')
+                            result.append(func)
+                        else:
+                            solver.pop()
+                            solver.add( b+c > pv_a.end )
                             if solver.check() == sat:
-                                #print('integer overflow!')
+                                # print('integer overflow!')
                                 result.append(func)
-                            else:
-                                solver.pop()
-                                solver.add( b+c > pv_a.end )
-                                if solver.check() == sat:
-                                    #print('integer overflow!')
-                                    result.append(func)
-
-                        # Is other RegisterValueType used in here?
-                        if b_type in {RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
-                            RegisterValueType.EntryValue, RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
-                                RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue} or  \
-                                        c_type in {RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
-                            RegisterValueType.EntryValue, RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
-                                RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue}:
-                            continue
-                            print(f'{func.start:#x}', inst, pv_a, pv_b, pv_c)
-                            raise
                                 
+                # 곱셈 연산
                 if inst.src.operation == MediumLevelILOperation.MLIL_MUL:
                     # FIXME: Range의 경우가 path에 영향을 받을 때, 현재 path를 구분하지 못하므로 false positive가 많음.
                     # TODO: a = 상수 + 상수 형태는 바이너리 닌자 LLIL -> MLIL 과정에서 a = value 형태로 최적화됨. 해당 경우 LLIL로 탐지해야 함.
 
-                    if type(inst.src.right) == MediumLevelILConst:
+                    # SSAVariable * 상수
+                    if type(inst.src.right) == MediumLevelILConst and type(inst.src.left) == MediumLevelILVarSsa:
+                        #print(f'{func.start:#x}', inst)
                         # a = b + c(constant value)
                         a = inst.dest
-                        b = inst.src.left.src
+                        b_value = inst.src.left.src
                         c = inst.src.right.constant
 
-                        pv_a = inst.get_ssa_var_possible_values(a)
-                        pv_b = inst.get_ssa_var_possible_values(b)
-
-                        # if a.var.type.get_string() == 'char':
-                        #     pv_a = pv_a.signed_range_value([ValueRange(-128, 127, 1)])
-                        #     pv_a = pv_a.ranges[0]
-                            
+                        pv_b = inst.get_ssa_var_possible_values(b_value)                            
                         pv_a = return_a_range(a.type.get_string())
 
                         if pv_a is None:
@@ -180,45 +188,54 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         b = Int('b')                            
                         b_type = pv_b.type
 
-                        if b_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+                        # TODO: handle this types
+                        if b_type in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
+                            RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
+                                RegisterValueType.LookupTableValue, RegisterValueType.ReturnAddressValue, \
+                                    RegisterValueType.StackFrameOffset):
+                            continue
+
+                        if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
                             pv_b = pv_b.ranges[0]
                             bi = Int('bi')
                             solver.add(b == pv_b.start + bi * pv_b.step)
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
-                        elif b_type in { RegisterValueType.InSetOfValues }:
+                        elif b_type is RegisterValueType.InSetOfValues:
                             solver.add(Or([b == value for value in pv_b.values]))
+                        elif b_type is RegisterValueType.NotInSetOfValues:
+                            solver.add(Or([b != value for value in pv_b.values]))
+                        elif b_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ) :
+                            # FIXME: This is argument value
+                            pv_b = return_a_range(b_value.type.get_string())
+                            if pv_b is None:
+                                continue
+                            solver.add(pv_b.start <= b, b <= pv_b.end)
 
-                        if b_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues}:
-                            solver.push()
-                            solver.add( b*c < pv_a.start )
+                        solver.push()
+                        solver.add( b*c < pv_a.start )
+                        if solver.check() == sat:
+                            # print('integer overflow!')
+                            result.append(func)
+                        else:
+                            solver.pop()
+                            solver.add( b*c > pv_a.end )
                             if solver.check() == sat:
-                                #print('integer overflow!')
+                                # print('integer overflow!')
                                 result.append(func)
-                            else:
-                                solver.pop()
-                                solver.add( b*c > pv_a.end )
-                                if solver.check() == sat:
-                                    #print('integer overflow!')
-                                    result.append(func)
 
-
-                    elif type(inst.src.right) == MediumLevelILVarSsa:
+                    # Multiply SSAVariable * SSaVariable
+                    elif type(inst.src.right) == MediumLevelILVarSsa and type(inst.src.left) == MediumLevelILVarSsa:
+                        #print(f'{func.start:#x}', inst)
                         # a = b + c
                         a = inst.dest
-                        b = inst.src.left.src
-                        c = inst.src.right.src
+                        b_value = inst.src.left.src
+                        c_value = inst.src.right.src
                         #print(a, b, c)
                         pv_a = inst.get_ssa_var_possible_values(a)
-                        pv_b = inst.get_ssa_var_possible_values(b)
-                        pv_c = inst.get_ssa_var_possible_values(c)
+                        pv_b = inst.get_ssa_var_possible_values(b_value)
+                        pv_c = inst.get_ssa_var_possible_values(c_value)
 
-                        # if a.var.type.get_string() == 'char':
-                        #     pv_a = pv_a.signed_range_value([ValueRange(-128, 127, 1)])
-                        #     pv_a = pv_a.ranges[0]
-                        #     #print(f'{func.start:#x}', inst, pv_a, pv_b, pv_c)
-                        # elif a.var.type.get_string() == 'int64_t':
                         pv_a = return_a_range(a.type.get_string())
-
                         if pv_a is None:
                             continue
 
@@ -229,58 +246,68 @@ def solution(bv: BinaryViewType) -> list[Function]:
                         b_type = pv_b.type
                         c_type = pv_c.type
 
-                        if b_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+                        # TODO: handle this types
+                        if any( i in (RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
+                            RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
+                                RegisterValueType.LookupTableValue, RegisterValueType.ReturnAddressValue, \
+                                    RegisterValueType.StackFrameOffset) for i in (b_type, c_type)):
+                            continue
+
+                        if b_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
                             pv_b = pv_b.ranges[0]
                             bi = Int('bi')
                             solver.add(b == pv_b.start + bi * pv_b.step)
                             solver.add(0 <= bi, bi <= (pv_b.end - pv_b.start)/pv_b.step)
-                        elif b_type in { RegisterValueType.InSetOfValues }:
+                        elif b_type is RegisterValueType.InSetOfValues :
                             solver.add(Or([b == value for value in pv_b.values]))
+                        elif b_type is RegisterValueType.NotInSetOfValues :
+                            solver.add(Or([b != value for value in pv_b.values]))
+                        elif b_type is ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ) :
+                            # FIXME: This is argument value
+                            pv_b = return_a_range(b_value.type.get_string())
+                            if pv_b is None:
+                                continue
+                            solver.add(pv_b.start <= b, b <= pv_b.end)
 
-                        if c_type in { RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue }:
+                        if c_type in ( RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue ):
                             pv_c = pv_c.ranges[0]
                             ci = Int('ci')
                             solver.add(c == pv_c.start + ci * pv_c.step)
                             solver.add(0 <= ci, ci <= (pv_c.end - pv_c.start)/pv_c.step)
-                        elif c_type in { RegisterValueType.InSetOfValues }:
+                        elif c_type is RegisterValueType.InSetOfValues :
                             solver.add(Or([c == value for value in pv_c.values]))
+                        elif c_type is RegisterValueType.NotInSetOfValues :
+                            solver.add(Or([c != value for value in pv_c.values]))
+                        elif c_type in ( RegisterValueType.EntryValue, RegisterValueType.UndeterminedValue ) :
+                            # FIXME: This is argument value
+                            pv_c = return_a_range(c_value.type.get_string())
+                            if pv_c is None:
+                                continue
+                            solver.add(pv_c.start <= c, c <= pv_c.end)
 
-                        if b_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues} and \
-                            c_type in {RegisterValueType.SignedRangeValue, RegisterValueType.UnsignedRangeValue, RegisterValueType.InSetOfValues}:
-                            solver.push()
-                            solver.add( b*c < pv_a.start )
+                        # check integer overflow
+                        solver.push()
+                        solver.add( b*c < pv_a.start )
+                        if solver.check() == sat:
+                            # print('integer overflow!')
+                            result.append(func)
+                        else:
+                            solver.pop()
+                            solver.add( b*c > pv_a.end )
                             if solver.check() == sat:
-                                #print('integer overflow!')
+                                # print('integer overflow!')
                                 result.append(func)
-                            else:
-                                solver.pop()
-                                solver.add( b*c > pv_a.end )
-                                if solver.check() == sat:
-                                    #print('integer overflow!')
-                                    result.append(func)
-
-                        # Is other RegisterValueType used in here?
-                        if b_type in {RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
-                            RegisterValueType.EntryValue, RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
-                                RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue} or  \
-                                        c_type in {RegisterValueType.ConstantPointerValue, RegisterValueType.ConstantValue, \
-                            RegisterValueType.EntryValue, RegisterValueType.ExternalPointerValue, RegisterValueType.ImportedAddressValue, \
-                                RegisterValueType.LookupTableValue, RegisterValueType.NotInSetOfValues, RegisterValueType.ReturnAddressValue, \
-                                    RegisterValueType.StackFrameOffset, RegisterValueType.UndeterminedValue}:
-                            continue
-                            print(f'{func.start:#x}', inst, pv_a, pv_b, pv_c)
-                            raise
                                 
-          
     return result
 
 if __name__ == '__main__':
-    #binary_path = '/Users/ch4rli3kop/binary-nomaj/integer_overflow_workspace/add'
-    #file_list = get_all_files_from_path(binary_path, 1)
-    binary_path = '/Users/ch4rli3kop/binary-nomaj/Juliet_amd64/testcases/CWE190_Integer_Overflow/'
+    # binary_path = '/Users/ch4rli3kop/binary-nomaj/integer_overflow_workspace/'
+    # file_list = get_all_files_from_path(binary_path, 1)
+    
+    binary_path = '/Users/ch4rli3kop/binary-nomaj/Juliet_amd64/testcases/CWE190_Integer_Overflow/s05'
+    file_list = get_all_files_from_path(binary_path)
     #file_list = get_matched_files_from_path(binary_path, ".*__char_.*_multiply.*out")
     #file_list = get_matched_files_from_path(binary_path, ".*__int.*_multiply.*out")
-    file_list = get_matched_files_from_path(binary_path, ".*_multiply.*out")
+    #file_list = get_matched_files_from_path(binary_path, ".*_multiply.*out")
     runner = Runner(solution, file_list)
     runner.run()
