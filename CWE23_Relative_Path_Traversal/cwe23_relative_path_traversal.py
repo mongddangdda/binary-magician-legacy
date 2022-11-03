@@ -1,5 +1,14 @@
-from binaryninja import *
+import os
+import sys
 from z3 import *
+from binaryninja import *
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from binaryninja.binaryview import BinaryViewType
+from binaryninja.function import Function
+from utils.runner import Runner
+from utils.utils import get_all_files_from_path
 
 def process(filename) :
     if len(sys.argv) > 1 :
@@ -80,13 +89,11 @@ def lift_target(lift_list, visited):
     elif track_var.operation == MediumLevelILOperation.MLIL_VAR_PHI:
         pass
     return def_ref
-for i in range(1, 85) :
-    answer = 0   
-    filename = f"/home/user/juliet/C/testcases/CWE23_Relative_Path_Traversal/s01/CWE23_Relative_Path_Traversal__char_connect_socket_fopen_{str(i).zfill(2)}.out"
-    #filename = f"/home/user/juliet/C/testcases/CWE23_Relative_Path_Traversal/s01/CWE23_Relative_Path_Traversal__char_connect_socket_ifstream_{str(i).zfill(2)}.out"
-    #filename = f"/home/user/juliet/C/testcases/CWE23_Relative_Path_Traversal/s01/CWE23_Relative_Path_Traversal__char_connect_socket_ofstream_{str(i).zfill(2)}.out"
-    #filename = f"/home/user/juliet/C/testcases/CWE23_Relative_Path_Traversal/s01/CWE23_Relative_Path_Traversal__char_connect_socket_open_{str(i).zfill(2)}.out"
-    #filename = f"/home/user/juliet/C/testcases/CWE23_Relative_Path_Traversal/s02/CWE23_Relative_Path_Traversal__char_environment_open_{str(i).zfill(2)}.out"
+
+def solution(bv: BinaryViewType) -> list[Function]:
+
+    result = [] # spicious function list
+    
     sinks = { #sinks
         'fopen': 0,
         '_ZNSt14basic_ifstreamIcSt11char_traitsIcEE4openEPKcSt13_Ios_Openmode' : 1,
@@ -104,38 +111,40 @@ for i in range(1, 85) :
         'fgetws' : 0,
         'strncat' : 0, #strncat(data+dataLen, environment, FILENAME_MAX-dataLen-1);
     }
-
-    bv = process(filename)
-    if bv is None :
-        continue
-    
-    for sink, sink_idx in sinks.items() :
-        for source, source_idx in sources.items() : #sources의 visited 확인
-            symbols_ref = get_func_refs(bv, source)
+    try :
+        for sink, sink_idx in sinks.items() :
+            for source, source_idx in sources.items() : #sources의 visited 확인
+                symbols_ref = get_func_refs(bv, source)
+                if symbols_ref is None :
+                    continue
+                def_refs = get_param_refs(symbols_ref, source_idx)
+                for ref in def_refs:
+                    lift_var = trace_var(ref, source_idx)
+                    lift_list = [lift_var]
+                    source_visited = []
+                    while len(lift_list) > 0:
+                        lift_target(lift_list, source_visited)
+                
+            symbols_ref = get_func_refs(bv, sink) #sinks의 visited 확인
             if symbols_ref is None :
-                continue
-            def_refs = get_param_refs(symbols_ref, source_idx)
+                    continue
+            def_refs = get_param_refs(symbols_ref, sink_idx)
             for ref in def_refs:
-                lift_var = trace_var(ref, source_idx)
+                lift_var = trace_var(ref, sink_idx)
                 lift_list = [lift_var]
-                source_visited = []
+                sink_visited = []
                 while len(lift_list) > 0:
-                    lift_target(lift_list, source_visited)
-            
-        symbols_ref = get_func_refs(bv, sink) #sinks의 visited 확인
-        if symbols_ref is None :
-                continue
-        def_refs = get_param_refs(symbols_ref, sink_idx)
-        for ref in def_refs:
-            lift_var = trace_var(ref, sink_idx)
-            lift_list = [lift_var]
-            sink_visited = []
-            while len(lift_list) > 0:
-                lift_target(lift_list, sink_visited)
-            
-            for sink in sink_visited : #sources와 sinks 둘 모두 방문했으면 tainted 판단. 
-                if sink in source_visited : 
-                    print(f"{str(i).zfill(2)}, {hex(ref[1])} : {ref[0]}")
-                    answer += 1
+                    lift_target(lift_list, sink_visited)
+                
+                for sink in sink_visited : #sources와 sinks 둘 모두 방문했으면 tainted 판단. 
+                    if sink in source_visited : 
+                        return bv.get_functions_containing(ref[1])
+    except :
+        pass
+    return result
 
-print(f"{i} : {answer}")
+if __name__ == '__main__':
+    file_list = get_all_files_from_path(f'/home/user/juliet/C/testcases/CWE23_Relative_Path_Traversal/s01/')
+    runner = Runner(solution, file_list)
+    runner.run(cpp_only=True)
+    
