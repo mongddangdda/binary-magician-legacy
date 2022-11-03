@@ -6,6 +6,11 @@ from binaryninja.binaryview import BinaryViewType
 def get_all_files_from_path(path: str, depth_level: int = None, file_type: str = '.out') -> list[Path]:
 
     base_directory = Path(path)
+
+    # is binary?
+    if base_directory.is_file():
+        return [base_directory]
+
     pattern = '**/*' # this means visiting all subdirectories recursively
 
     if depth_level is not None:
