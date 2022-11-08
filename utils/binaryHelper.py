@@ -36,23 +36,24 @@ class CBinaryHelper():
 
     def run(self, solution = None):
         assert solution is not None
+
         self.result = solution(self.bv)
-        self.bad_function = self._find_answer()
-        self.bad_function_path = self._find_answer_function_path()
+        self._find_answer()
+        self._find_answer_function_path()
 
     # @property
     # def result(self):
     #     return self.result
 
     @property
-    def answer(self):
+    def answer(self) -> list[Function]:
         return self.bad_function
     
     @property
-    def answer_path(self):
+    def answer_path(self) -> nx.DiGraph:
         return self.bad_function_path
 
-    def _find_answer(self) -> list[Function]:
+    def _find_answer(self):
         # FIXME: this code work correctly only when binary has one vulnerability
         bad_functions = [func for func in self.bv.functions if re.match('_?CWE.*badSink', func.name)]
 
@@ -67,8 +68,7 @@ class CBinaryHelper():
 
         if len(bad_functions) < 1:
             bad_functions = [func for func in self.bv.functions if re.match('_?CWE.*bad$', func.name)]
-        
-        return bad_functions
+        self.bad_function = bad_functions
 
     def _find_answer_function_path(self):
         bad_function = [func for func in self.bv.functions if re.match('_?CWE.*bad$', func.name)]
@@ -97,16 +97,11 @@ class CBinaryHelper():
                 break
             bad = bad[0]
             self.bad_function_path.add_node(bad.name)
-            self.bad_function_path.add_edge(prev, bad.name)
-
-        return self.bad_function_path
-        
+            self.bad_function_path.add_edge(prev, bad.name) 
 
 class CPPBinaryHelper(CBinaryHelper):
-    def __init__(self, file: Path) -> None:
-        super().__init__(file)
-        self.platform: str = self.bv.platform.name
-
+    def __init__(self, bv: BinaryView) -> None:
+        super().__init__(bv)
 
     def demangle_func_name(self, func: str) -> str:
         if func[:2] == '_Z':
@@ -119,7 +114,7 @@ class CPPBinaryHelper(CBinaryHelper):
         else:
             return func
 
-    def get_answer(self) -> list[Function]:
+    def _find_answer(self):
         # FIXME: this code work correctly only when binary has one vulnerability
         bad_functions = [func for func in self.bv.functions if re.match('_?CWE.*badSink', self.demangle_func_name(func.name))]
 
@@ -135,9 +130,9 @@ class CPPBinaryHelper(CBinaryHelper):
         if len(bad_functions) < 1:
             bad_functions = [func for func in self.bv.functions if re.match('_?CWE.*bad$', self.demangle_func_name(func.name))]
         
-        return bad_functions
+        self.bad_function = bad_functions
 
-    def get_answer_function_path(self):
+    def _find_answer_function_path(self):
         bad_function = [func for func in self.bv.functions if re.match('_?CWE.*bad$', self.demangle_func_name(func.name))]
         if len(bad_function) < 1:
             raise
@@ -165,5 +160,3 @@ class CPPBinaryHelper(CBinaryHelper):
             bad = bad[0]
             self.bad_function_path.add_node(bad.name)
             self.bad_function_path.add_edge(prev, bad.name)
-
-        return self.bad_function_path

@@ -21,7 +21,7 @@ from utils.utils import is_cpp_binary
 from utils.binaryHelper import *
 
 class Runner:
-    def __init__(self, solution=None, file_list=[]) -> None:
+    def __init__(self, solution = None, file_list: list[Path] = []) -> None:
         assert solution is not None, f'run with solution function!'
         assert len(file_list) > 0, f'run with file list!'
 
@@ -34,8 +34,9 @@ class Runner:
         self.options = 0 # c_only = 0, cpp_only = 1, all = 2
 
     def _get_binaryhelper(self, file: Path):
+        # TODO: make code condition more clear
         bv = BinaryViewType.get_view_of_file(file.absolute())
-        binary_type = is_cpp_binary(bv)
+        binary_type = is_cpp_binary(bv) 
 
         if binary_type:
             self.cpp.append(file)
