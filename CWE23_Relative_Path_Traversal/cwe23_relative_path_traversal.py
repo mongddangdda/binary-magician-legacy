@@ -90,14 +90,23 @@ def lift_target(lift_list, visited):
         pass
     return def_ref
 
+def demangle_function(bv, func: Function) -> str:
+    if func.name[:2] == '_Z':
+        if bv.platform.name.split('-')[0] == 'linux':
+            name = demangle_gnu3(bv.arch, func.name)[1]
+        elif bv.platform.name.split('-')[0] == 'windows':
+            name = demangle_ms(bv.arch, func.name)[1]
+        func_name = get_qualified_name(name)
+        return func_name
+    else:
+        return func.name
+
 def solution(bv: BinaryViewType) -> list[Function]:
 
     result = [] # spicious function list
     
     sinks = { #sinks
         'fopen': 0,
-        '_ZNSt14basic_ifstreamIcSt11char_traitsIcEE4openEPKcSt13_Ios_Openmode' : 1,
-        '_ZNSt14basic_ofstreamIcSt11char_traitsIcEE4openEPKcSt13_Ios_Openmode' : 1,
         'open': 0,
         '_open': 0,
         'wopen': 0, 
@@ -111,6 +120,12 @@ def solution(bv: BinaryViewType) -> list[Function]:
         'fgetws' : 0,
         'strncat' : 0, #strncat(data+dataLen, environment, FILENAME_MAX-dataLen-1);
     }
+    
+    for func in bv.functions:
+        if demangle_function(bv, func) == "std::basic_ifstream<char, std::char_traits<char> >::open" or\
+            demangle_function(bv, func) == "std::basic_ofstream<char, std::char_traits<char> >::open" :
+            sinks[func.name] = 1
+    
     try :
         for sink, sink_idx in sinks.items() :
             for source, source_idx in sources.items() : #sources의 visited 확인
