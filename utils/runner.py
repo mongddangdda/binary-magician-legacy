@@ -12,7 +12,6 @@ Runner Class:
 
 
 from pathlib import Path
-import re
 from binaryninja.binaryview import BinaryViewType
 from binaryninja.function import Function
 from binaryninja.demangle import *
@@ -22,7 +21,10 @@ from utils.utils import is_cpp_binary
 from utils.binaryHelper import *
 
 class Runner:
-    def __init__(self, solution=None, file_list=[]) -> None:
+    def __init__(self, solution = None, file_list: list[Path] = []) -> None:
+        assert solution is not None, f'run with solution function!'
+        assert len(file_list) > 0, f'run with file list!'
+
         self.solution = solution
         self.file_list = file_list # TODO: {file: (result, answer)} 형태로
         self.files_good = dict()
@@ -30,19 +32,29 @@ class Runner:
         self.files_fp = dict() # false positive
         self.cpp = []
         self.options = 0 # c_only = 0, cpp_only = 1, all = 2
-        self._check_args()
-    
-    def _check_args(self) -> None:
-        if self.solution is None:
-            print(f'run with solution function!')
-            exit()
-        if len(self.file_list) < 1:
-            print(f'run with file list!')
-            exit()
+
+    def _get_binaryhelper(self, file: Path):
+        # TODO: make code condition more clear
+        bv = BinaryViewType.get_view_of_file(file.absolute())
+        binary_type = is_cpp_binary(bv) 
+
+        if binary_type:
+            self.cpp.append(file)
+
+        if self.options == 0 and binary_type:
+            # c_only mode & cpp binary
+            return None
+        if self.options == 1 and not binary_type:
+            # cpp_only mode & c binary
+            return None
+        
+        if not binary_type:
+            return CBinaryHelper(bv)
+        else:
+            return CPPBinaryHelper(bv)
 
     def run(self, c_only = True, cpp_only = False, all = False ) -> None:
         if cpp_only:
-            c_only = False
             self.options = 1
         elif all:
             self.options = 2
@@ -50,18 +62,13 @@ class Runner:
         file: Path
         for file in self.file_list:
             print(f'{file.name} is running... ')
-            binary = CBinaryHelper(file)
-            if binary.is_cpp and ( not c_only or all ):
-                binary = CPPBinaryHelper(file)
-                self.cpp.append(file)
-            elif cpp_only:
-                del binary
+
+            binary = self._get_binaryhelper(file)        
+            if binary is None:
                 continue
-            
-            result = binary.run(self.solution)
-            answer = binary.get_answer()
-            self.evaluation(file.name, result, answer)
-            del binary
+            binary.run(self.solution)
+            print(binary.answer_path)
+            self.evaluation(file.name, binary.result, binary.answer)
         self.show_result()
 
     def evaluation(self, file: str, result: list[Function], answer: list[Function]):
