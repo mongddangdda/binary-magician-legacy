@@ -63,9 +63,11 @@ def get_inline_cfg_path(bv: BinaryView, start: int, target: int) -> list[nx.DiGr
 
     return result
 
-def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVariable) -> list[SSAVariable]:
+
+
+def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVariable, path: nx.DiGraph) -> list[SSAVariable]:
     '''
-    하나의 함수 내에서 인자 var 값에 영향을 미치는 모든 변수를 리스트 형태로 리턴함
+    하나의 함수 내에서 인자 var 값에 영향을 미치는 변수 중 path 내에 존재하는 모든 변수를 리스트 형태로 리턴함
 
     return : [<ssa rax_5 version 6>, <ssa var_11_1 version 1>, <ssa rax_4 version 5>, <ssa rax_3 version 4>, <ssa var_12 version 2>]
     '''
@@ -77,6 +79,12 @@ def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVar
 
     while len(taint) > 0:
         track_var = taint.pop()
+
+        # path 내에 존재하는지 확인
+        bb = bv.get_basic_blocks_at(track_var.address)
+        if not path.has_node(bb):
+            continue
+
 
         if track_var in visited:
             continue
