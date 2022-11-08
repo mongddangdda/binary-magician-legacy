@@ -66,6 +66,59 @@ def get_inline_cfg_path(bv: BinaryView, start: int, target: int) -> list[nx.DiGr
 def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVariable) -> list[SSAVariable]:
     '''
     하나의 함수 내에서 인자 var 값에 영향을 미치는 모든 변수를 리스트 형태로 리턴함
+
+    return : [<ssa rax_5 version 6>, <ssa var_11_1 version 1>, <ssa rax_4 version 5>, <ssa rax_3 version 4>, <ssa var_12 version 2>]
     '''
-    
-    pass
+    result = []
+
+    visited = []
+    taint = []
+    taint.append( function.mlil.ssa_form.get_ssa_var_definition(var) )
+
+    while len(taint) > 0:
+        track_var = taint.pop()
+
+        if track_var in visited:
+            continue
+
+        visited.append(track_var)
+
+        # FIXME: 모든 Operation에 대해 SSAVariable 리턴하는 클래스 구현
+        if track_var.operation not in ( MediumLevelILOperation.MLIL_SET_VAR_SSA, MediumLevelILOperation.MLIL_SET_VAR, \
+        MediumLevelILOperation.MLIL_VAR_PHI ):
+            continue
+
+        if track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
+        track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+        # SET_VAR인 경우 
+            if track_var.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
+                #SET_VAR의 src가 CONST_PTR인 경우
+                continue
+            if track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
+                continue
+            # src trace
+            var = track_var.src.ssa_form
+
+            if var.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
+                #LOAD인 경우 해당 src를 참조
+                var = var.src
+            if var.operation == MediumLevelILOperation.MLIL_ADD or \
+            var.operation == MediumLevelILOperation.MLIL_SUB or \
+            var.operation == MediumLevelILOperation.MLIL_MUL or \
+            var.operation == MediumLevelILOperation.MLIL_DIVS:
+                #src가 operation인 경우, VAR 참조
+                if var.left.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                    var = var.left
+                else:
+                    var = var.right
+            while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
+                var = var.src
+            
+            result.append(var)
+            def_ref = track_var.ssa_form.function.get_ssa_var_definition(var)
+            if def_ref == None:
+                continue
+
+            taint.append(def_ref)
+
+    return result
