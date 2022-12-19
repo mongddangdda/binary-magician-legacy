@@ -1,6 +1,7 @@
 from binaryninja import *
 import networkx as nx
 from dataclasses import dataclass
+import builtins
 '''
 TODO: list
 - [ ] docstring format에 맞게 수정하기 및 영어로 작성
@@ -15,6 +16,28 @@ class target:
     ssavars: list[SSAVariable]
     args: list[int]
 
+def get_target_by_addr_args(bv: BinaryView, type: str, addr: int, args: list[int]) -> target:
+    function = bv.get_functions_containing(addr=addr)[0]
+    ssavars = []
+    for arg_num in args:
+        #_taint_param = caller.function.get_llil_at(caller.address).mlil.ssa_form.params[int(arg_num)-1]
+        _taint_param = function.get_llil_at(addr).mlil.ssa_form.params[arg_num]
+        if builtins.type(_taint_param) is MediumLevelILVarSsa:
+            ssavars.append(_taint_param.src)
+    return target(type=type, addr=addr, function=function, ssavars=ssavars, args=args)
+
+def get_target_by_func_ssavars(bv: BinaryView, type: str, function: Function, ssavars: list[SSAVariable]) -> target:
+    pass
+
+@dataclass
+class callHierarchy:
+    head: Function
+    source: target
+    sink: target
+    graph: nx.DiGraph
+
+
+
 class PathFinder():
     '''
     source -> sink 경로를 관리하기 위한 클래스
@@ -27,7 +50,7 @@ class PathFinder():
     - 리턴된 경로는 추후 updater에서 PossibleValueSet을 업데이트하는 데에 사용됨
     
     ### todo list
-    - [ ] call path 만들기 (단순 function - function)
+    - [x] call path 만들기 (단순 function - function)
     - [ ] call 간 호출 위치로 더 자세한 path 만들기 ( (function, call site, argument) - (function, call site, argument) )
     '''
     def __init__(self, bv: BinaryView) -> None:
@@ -128,21 +151,25 @@ class PathFinder():
         return func.get_llil_at(addr).mlil.ssa_form.params[idx-1]
 
 
-    def backward_analysis_from_target(self, source_addr: int, arg_idxs: list[int]) -> set[Function]:
+    def backward_analysis_from_target(self, target: target) -> set[Function]:
         '''
         ### 000014b2      __isoc99_fscanf(stream: stdin, format: "%c", &var_12)
         When like above, the source_addr is 0x14b2 and the arg_idxs is [2] (var_12)
         '''
         source_group = set()
+        print(target)
+        # start = self.bv.get_functions_containing(source_addr)[0] # get source function
+        # #print(start)
+        # ssavars = []
+        # for arg_num in arg_idxs:
+        #     _taint_param = self.param_idx_to_ssavar(start, source_addr, arg_num)
+        #     _taint_param = start.get_llil_at(source_addr).mlil.ssa_form.params[arg_num]
+        #     if type(_taint_param) is MediumLevelILVarSsa:
+        #         ssavars.append(_taint_param.src)
+        # source_group.add(start)
 
-        start = self.bv.get_functions_containing(source_addr)[0] # get source function
-        #print(start)
-        ssavars = []
-        for arg_num in arg_idxs:
-            _taint_param = self.param_idx_to_ssavar(start, source_addr, arg_num)
-            _taint_param = start.get_llil_at(source_addr).mlil.ssa_form.params[arg_num]
-            if type(_taint_param) is MediumLevelILVarSsa:
-                ssavars.append(_taint_param.src)
+        start = target.function
+        ssavars = target.ssavars
         source_group.add(start)
 
         tmp = [(start, ssavars)]
@@ -173,7 +200,7 @@ class PathFinder():
 
     def get_simple_path(self, source: target, sink: target) -> list[nx.DiGraph]:
         '''source 부터 sink 까지 있을 수 있는 노드 그래프에서의 path 리턴'''
-        source_group = self.backward_analysis_from_target(source.addr, source.args)
+        source_group = self.backward_analysis_from_target(source)
         # print(source_group)
         result = []
 
