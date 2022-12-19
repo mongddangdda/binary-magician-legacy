@@ -55,8 +55,9 @@ class PathFinder():
     '''
     def __init__(self, bv: BinaryView) -> None:
         self.bv = bv
-        self.graph = nx.DiGraph()
-        self.sources = list[target]
+        self.graph = nx.DiGraph() # entire graph
+        self.sources: list[target] = []
+        self.paths: list[callHierarchy] = []
 
         self._make_entire_call_graph()
 
@@ -83,7 +84,7 @@ class PathFinder():
 
         visited = []
         taint = []
-        print(vars)
+        #print(vars)
         for var in vars:
             taint.append( function.mlil.ssa_form.get_ssa_var_definition(var) )
 
@@ -157,7 +158,7 @@ class PathFinder():
         When like above, the source_addr is 0x14b2 and the arg_idxs is [2] (var_12)
         '''
         source_group = set()
-        print(target)
+        #print(target)
         # start = self.bv.get_functions_containing(source_addr)[0] # get source function
         # #print(start)
         # ssavars = []
@@ -192,13 +193,13 @@ class PathFinder():
                     if type(_taint_param) is MediumLevelILVarSsa:
                         _ssavars.append(_taint_param.src)
                 
-                print('function', caller.function)
+                # print('function', caller.function)
                 source_group.add(caller.function)
                 tmp.append((caller.function, _ssavars))
 
         return source_group
 
-    def get_simple_path(self, source: target, sink: target) -> list[nx.DiGraph]:
+    def get_simple_path(self, source: target, sink: target) -> list[callHierarchy]:
         '''source 부터 sink 까지 있을 수 있는 노드 그래프에서의 path 리턴'''
         source_group = self.backward_analysis_from_target(source)
         # print(source_group)
@@ -223,14 +224,47 @@ class PathFinder():
                     #print('path_to_sink', path_to_sink)
                     for path_to_source in paths_to_source:
                         #print('path_to_source', path_to_source)
-                        subgraph = self.graph.subgraph(list(path_to_sink) + list(path_to_source))
-                        result.append(subgraph)
+                        subgraph = self.graph.subgraph(list(path_to_sink) + list(path_to_source)).copy()
+                        result.append(callHierarchy(head=head, source=source, sink=sink, graph=subgraph))
+        
+        # update edge with call_sites attribute
+        for callgraph in result:
+            callgraph: callHierarchy
+            edges = nx.bfs_edges(callgraph.graph, callgraph.head)
+            for start, end in edges:
+                #print('start', start, end)
+                call_sites: list[ReferenceSource] = []
+                for idx, call_site in enumerate(start.call_sites):
+                    call_site: ReferenceSource
+                    # if call_site.function == end:  # shallow copy issue 확인해보기
+                    #print('call_site', call_site)
+                    #print(start.callees[idx], end)
+                    if start.callees[idx].start == end.start:
+                        call_sites.append(call_site)
+                nx.set_edge_attributes(callgraph.graph, {(start, end): {'call_sites': call_sites}})
+
         return result
+
+    def get_call_sites_path(self, callgraphs: list[callHierarchy]):
+        pass
 
     def save_path_to_image(self, graph: nx.DiGraph, file: str):
         '''source - sink path를 이미지로 저장하기'''
+        edge_labels = nx.get_edge_attributes(graph, 'call_sites')
+
+        def make_edge_name(call_sites):
+            #return ''.join([str(call_site.function.get_llil_at(call_site.address).hlil) for call_site in call_sites])
+            return ''.join(['call at '+hex(call_site.address) for call_site in call_sites])
+
+        formatted_edge_labels = {(elem[0],elem[1]): make_edge_name(edge_labels[elem]) for elem in edge_labels}
+        # attribute 데이터가 있으면 아래의 position 구하는 부분에서 error 발생하기 때문에 지워줌
+        for _, _, call_sites in graph.edges(data=True):
+            call_sites.clear()
+        
         pos = nx.nx_pydot.graphviz_layout(graph, prog='dot')
         nx.draw(graph, pos=pos, with_labels=True)
+        nx.draw_networkx_edge_labels(graph, pos=pos, edge_labels=formatted_edge_labels)
+        
         try:
             import matplotlib.pyplot as plt
             plt.savefig(file)
