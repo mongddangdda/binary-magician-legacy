@@ -205,13 +205,26 @@ class PathFinder():
         result = []
 
         for head in source_group:
-            paths = list(nx.all_simple_paths(self.graph, head, sink.function))
-            if len(paths) > 0:
-                # print(paths)
+            if head == source.function:
+                paths_to_source = [source.function]
+            else:
+                paths_to_source = list(nx.all_simple_paths(self.graph, head, source.function))
+            
+            #print('path_to_source', paths_to_source)
+            if head == sink.function:
+                paths_to_sink = [sink.function]
+            else:
+                paths_to_sink = list(nx.all_simple_paths(self.graph, head, sink.function))
+
+            if len(paths_to_sink) > 0:
+                #print('head', head)
                 # some data structure with head, source, sink ..? or subgraph
-                for path in paths:
-                    subgraph = self.graph.subgraph(path + list(source_group))
-                    result.append(subgraph)
+                for path_to_sink in paths_to_sink:
+                    #print('path_to_sink', path_to_sink)
+                    for path_to_source in paths_to_source:
+                        #print('path_to_source', path_to_source)
+                        subgraph = self.graph.subgraph(list(path_to_sink) + list(path_to_source))
+                        result.append(subgraph)
         return result
 
     def save_path_to_image(self, graph: nx.DiGraph, file: str):
