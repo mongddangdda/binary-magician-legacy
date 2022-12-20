@@ -35,6 +35,7 @@ class callHierarchy:
     source: target
     sink: target
     graph: nx.DiGraph
+    # functions: dict
 
 
 
@@ -245,8 +246,41 @@ class PathFinder():
 
         return result
 
-    def get_call_sites_path(self, callgraphs: list[callHierarchy]):
-        pass
+    def get_call_sites_by_path(self, callgraph: callHierarchy):
+        functions = dict()
+        for start, end, data in callgraph.graph.edges(data=True):
+            print(start, end, data)
+            for call_site in data['call_sites']:
+                functions[end] = { call_site : [] }
+                instr :  mediumlevelil.MediumLevelILCallSsa = start.get_llil_at(call_site.address).mlil.ssa_form
+                
+                # 일반적인 함수 호출일 때
+                if instr.operation == MediumLevelILOperation.MLIL_CALL_SSA:
+                    for idx, param in enumerate(start.get_llil_at(call_site.address).mlil.ssa_form.params):
+                        # TODO: param type에 따라 처리하기
+                        if type(param) == MediumLevelILVarSsa:
+                            functions[end][call_site].append(
+                                ( f'arg{idx}', param.src, start.get_llil_at(call_site.address).mlil.ssa_form.get_ssa_var_possible_values(param.src) )
+                            )
+                        if type(param) == MediumLevelILConst:
+                            functions[end][call_site].append(
+                                ( f'arg{idx}', param, PossibleValueSet.constant(param.constant) )
+                            )
+        return functions
+    
+    def update_possibleValue(self, function: Function, ref: ReferenceSource, data: list[set]):
+        
+        function.clear_all_user_var_values()
+       
+        for name, ssavar, possiblevalue in data:
+            for instr in function.mlil.ssa_form.basic_blocks[0]:
+                if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA and \
+                    type(instr.src) == MediumLevelILVarSsa:
+                    instr.src.src.var.name: str
+                    if instr.src.src.var.name.startswith(name):
+                        var = instr.dest.var
+                        function.set_user_var_value(var=var, def_addr=instr.address, value=possiblevalue)
+    
 
     def save_path_to_image(self, graph: nx.DiGraph, file: str):
         '''source - sink path를 이미지로 저장하기'''

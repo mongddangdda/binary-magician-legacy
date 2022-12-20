@@ -9,6 +9,7 @@ from binaryninja.function import Function
 from utils.runner import Runner
 from utils.utils import get_all_files_from_path
 from utils.path_finder import *
+from pprint import pprint
 
 def solution(bv: BinaryViewType) -> list[Function]:
 
@@ -17,8 +18,18 @@ def solution(bv: BinaryViewType) -> list[Function]:
     source = get_target_by_addr_args(bv=bv, type='source', addr=0x14b2, args=[2])
     sink = get_target_by_addr_args(bv=bv, type='sink', addr=0x13f5, args=[0])
     pf = PathFinder(bv)
-    graphs = pf.get_simple_path(source, sink)
-    pf.save_path_to_image(graphs[0], '.\\test3.png')
+    paths = pf.get_simple_path(source, sink)
+    for path in paths:
+        # print(path.graph.edges.data())
+        # pprint(path)
+        functions = pf.get_call_sites_by_path(path)
+#        pprint(functions)
+        for function, refs in functions.items():
+            for ref, data in refs.items():
+                pf.update_possibleValue(function, ref, data)
+                # here your code
+
+    #pf.save_path_to_image(graphs[0].graph, '.\\test4.png')
 
     return []
 
