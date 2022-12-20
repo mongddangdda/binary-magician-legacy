@@ -32,7 +32,7 @@ class CBinaryHelper():
         self.bv = bv
         self.platform: str = self.bv.platform.name
         self.bad_function = []
-        self.bad_function_path = nx.DiGraph()
+        self.bad_function_path = nx.DiGraph() # not using now
 
     def run(self, solution = None):
         assert solution is not None

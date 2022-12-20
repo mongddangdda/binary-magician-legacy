@@ -33,7 +33,7 @@ def is_cpp_binary(bv: BinaryViewType) -> bool:
     
     return False
 
-def get_function_cfg(function) -> nx.DiGraph:
+def get_function_cfg(function: Function) -> nx.DiGraph:
     g = nx.DiGraph()
 
     for bb in function.mlil.ssa_form.basic_blocks:
@@ -65,7 +65,8 @@ def get_inline_cfg_path(bv: BinaryView, start: int, target: int) -> list[nx.DiGr
 
 
 
-def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVariable, path: nx.DiGraph) -> list[SSAVariable]:
+#def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVariable, path: nx.DiGraph) -> list[SSAVariable]:
+def get_related_vars_in_function(function: Function, var: SSAVariable) -> list[SSAVariable]:
     '''
     하나의 함수 내에서 인자 var 값에 영향을 미치는 변수 중 path 내에 존재하는 모든 변수를 리스트 형태로 리턴함
 
@@ -75,15 +76,16 @@ def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVar
 
     visited = []
     taint = []
+    print(var, type(var))
     taint.append( function.mlil.ssa_form.get_ssa_var_definition(var) )
 
     while len(taint) > 0:
         track_var = taint.pop()
 
         # path 내에 존재하는지 확인
-        bb = bv.get_basic_blocks_at(track_var.address)
-        if not path.has_node(bb):
-            continue
+        # bb = bv.get_basic_blocks_at(track_var.address)
+        # if not path.has_node(bb):
+        #     continue
 
 
         if track_var in visited:
@@ -130,3 +132,134 @@ def get_related_vars_in_function(bv: BinaryView, function: Function, var: SSAVar
             taint.append(def_ref)
 
     return result
+
+def get_entire_call_graph(bv: BinaryView) -> nx.DiGraph:
+    graph = nx.DiGraph()
+
+    # entry point
+    # export function
+
+    for func in bv.functions:
+        for caller in func.callers:
+            graph.add_edge(caller, func)
+        for callee in func.callees:
+            graph.add_edge(func, callee)
+    
+    return graph
+
+def get_var_initialized_with_argument(func: Function) -> list[SSAVariable]:
+    '''
+    mlil의 첫 번째 basic block에서 인자와 관련된 초기화를 모두 수행
+    '''
+    result = []
+    
+    bb = func.mlil.ssa_form.basic_blocks[0]
+    for instr in bb:
+        if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA and \
+            type(instr.src) == MediumLevelILVarSsa:
+            instr.src.src.var.name: str
+            if instr.src.src.var.name.startswith('arg'):
+                #print('[+]',instr.src.src.var.name, instr.src.src.var.type)
+                result.append(instr.dest)
+
+    return result
+
+'''
+head
+source
+sink
+path
+'''
+
+def is_interprocedurable(func: Function, ssaVar: SSAVariable) -> bool:
+    '''
+    해당 함수 내의 ssaVar이 인자로부터 초기화되었는지 확인
+    True: 인자로부터 초기화
+    False: x 
+    '''
+    vars = get_var_initialized_with_argument(func)
+    tainted_vars = get_related_vars_in_function(func, ssaVar)
+    for var in vars:
+        if var in tainted_vars:
+            return True
+    return False
+
+def get_call_graph_source_sink(bv: BinaryView, source: Function, src_addr, sink: Function, sink_addr) -> list[nx.DiGraph]:
+    
+    '''
+    TODO: make a customized data structure
+    data structure : a list of path that is consisted of source, sink, head ...
+    '''
+
+
+    # get entire call graph
+    entire_call_graph = get_entire_call_graph(bv)
+
+    source_group = [source]
+
+    # make source group
+    # source 함수의 모든 ancestor 방문
+    # - 1. 인자로 초기화되는 변수 추출
+    # - 2. taint되는 변수 중 1의 변수가 존재하는지 확인
+    # - 3. 존재한다면 상위 ancestor를 방문하기
+    # FIXME: source 함수를 호출하는 부분이 여러 곳일 경우 구분하도록 수정해야 함
+    # TODO: return 도 전파하기
+    #ancestors = nx.ancestors(entire_call_graph, source)
+    stack = []
+
+    src_ssa_vars = source.get_llil_at(src_addr).mlil.ssa_form.params
+    # taint 된 변수가 인자로 초기화되는지 확인
+    for src_ssa_var in src_ssa_vars:
+        if type(src_ssa_var.src) == SSAVariable:
+            if is_interprocedurable(source, src_ssa_var):
+                stack.append(source)
+    
+    while len(stack) > 0:
+        target = stack.pop()
+        for caller_site in target.caller_sites:
+            src_ssa_vars = source.get_llil_at(caller_site.addr).mlil.ssa_form.params
+            for src_ssa_var in src_ssa_vars:
+                if type(src_ssa_var.src) == SSAVariable:
+                    if is_interprocedurable(target, src_ssa_vars):
+                        stack.append(caller_site.function)
+                        source_group.append(caller_site.function)
+        
+    print(source_group)
+    # get bad sink
+
+    # make subgraph
+
+
+    return []
+
+def get_call_graph_source_sink1(bv: BinaryView, source: Function, sink: Function) -> list[nx.DiGraph]:
+    
+    '''
+    TODO: make a customized data structure
+    data structure : a list of path that is consisted of source, sink, head ...
+    '''
+    result = []
+
+    # get entire call graph
+    entire_call_graph = get_entire_call_graph(bv)
+
+    source_group = [source]
+
+    # make source group
+    ancestors = nx.ancestors(entire_call_graph, source)
+    source_group = list(ancestors) + [source]
+
+    # make subgraph
+    for head in source_group:
+        #print(head)
+        paths = list(nx.all_simple_paths(entire_call_graph, head, sink))
+        if len(paths) > 0:
+            # some data structure with head, source, sink ..? or subgraph
+            for path in paths:
+                subgraph = entire_call_graph.subgraph(path + source_group)
+                result.append(subgraph)
+
+    return result
+
+def update_possible_value(call_path):
+    return call_path
