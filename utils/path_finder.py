@@ -38,7 +38,6 @@ class callHierarchy:
     # functions: dict
 
 
-
 class PathFinder():
     '''
     source -> sink 경로를 관리하기 위한 클래스
@@ -141,6 +140,7 @@ class PathFinder():
 
                 # TODO: call 모든 인자 taint 리스트에 추가
 
+
                 taint.append(def_ref)
 
         return result
@@ -205,6 +205,12 @@ class PathFinder():
         source_group = self.backward_analysis_from_target(source)
         # print(source_group)
         result = []
+
+        # when there are source and sink in same function.
+        if source.function == sink.function:
+            subgraph = self.graph.subgraph([source.function]).copy()
+            result.append(callHierarchy(head=source.function, source=source, sink=sink, graph=subgraph))
+            return result
 
         for head in source_group:
             if head == source.function:
@@ -305,3 +311,5 @@ class PathFinder():
         except:
             print('file save error!')
 
+    def save_bndb_file_by_path(self):
+        pass
