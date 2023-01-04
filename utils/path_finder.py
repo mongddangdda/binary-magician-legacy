@@ -37,6 +37,10 @@ class callHierarchy:
     graph: nx.DiGraph
     # functions: dict
 
+class PathObj():
+    def __init__(self) -> None:
+        pass
+
 
 class PathFinder():
     '''
@@ -58,6 +62,7 @@ class PathFinder():
         self.graph = nx.DiGraph() # entire graph
         self.sources: list[target] = []
         self.paths: list[callHierarchy] = []
+        self.tainted = dict()
 
         self._make_entire_call_graph()
 
@@ -139,7 +144,7 @@ class PathFinder():
                     continue
 
                 # TODO: call 모든 인자 taint 리스트에 추가
-
+                
 
                 taint.append(def_ref)
 
@@ -177,9 +182,13 @@ class PathFinder():
         tmp = [(start, ssavars)]
         while len(tmp) > 0:
             func, ssavars = tmp.pop()
-            tainted = self.get_related_vars_in_function(func, ssavars) # 특정 변수들과 관련된 
-            #print(tainted)
-
+            tainted = self.get_related_vars_in_function(func, ssavars) # 해당 함수 내의 특정 변수들로 taint 된 변수 리스트 리턴
+            print(ssavars, tainted)
+            # TODO: save function's tainted varaible
+            if self.tainted.get(func) is None:
+                self.tainted[func] = dict()
+            self.tainted[func][tuple(ssavars)] = tainted
+            
             args = [(arg, arg.var.name.split('arg')[1]) for arg in tainted if arg.var.name.startswith('arg')]
             if len(args) < 1: # argument로 초기화된 변수가 없을 때는 패스
                 continue
@@ -241,16 +250,61 @@ class PathFinder():
             for start, end in edges:
                 #print('start', start, end)
                 call_sites: list[ReferenceSource] = []
-                for idx, call_site in enumerate(start.call_sites):
+                for call_site in start.call_sites: # start 내에서 end를 호출한 위치
                     call_site: ReferenceSource
-                    # if call_site.function == end:  # shallow copy issue 확인해보기
-                    #print('call_site', call_site)
-                    #print(start.callees[idx], end)
-                    if start.callees[idx].start == end.start:
-                        call_sites.append(call_site)
+                    mlil = call_site.function.get_llil_at(call_site.address).mlil.ssa_form
+                    print('call_site', call_site)
+                    if mlil.operation == MediumLevelILOperation.MLIL_CALL:
+                        try:
+                            if mlil.dest.constant == end.start:
+                                call_sites.append(call_site)
+                        except:
+                            print('indirect call!')
                 nx.set_edge_attributes(callgraph.graph, {(start, end): {'call_sites': call_sites}})
+                print(start, end, call_sites)
 
         return result
+
+
+    def backward_analysis_from_target2(self, target: target) -> set[Function]:
+        '''
+        TODO: 각 노드를 target 타입으로 사용하는 새로운 backward analysis graph 생성함수
+        '''
+        # source_group = set()
+
+        # start = target.function
+        # ssavars = target.ssavars
+        # source_group.add(start)
+
+        # tmp = [(start, ssavars)]
+        # while len(tmp) > 0:
+        #     func, ssavars = tmp.pop()
+        #     tainted = self.get_related_vars_in_function(func, ssavars) # 해당 함수 내의 특정 변수들로 taint 된 변수 리스트 리턴
+        #     #print(tainted)
+
+        #     args = [(arg, arg.var.name.split('arg')[1]) for arg in tainted if arg.var.name.startswith('arg')]
+        #     if len(args) < 1: # argument로 초기화된 변수가 없을 때는 패스
+        #         continue
+
+        #     arg_nums = [arg_num for _, arg_num in args]
+        #     refs = self.bv.get_code_refs(func.start)
+        #     for caller in refs:
+        #         _ssavars = []
+        #         for arg_num in arg_nums:
+        #             _taint_param = self.param_idx_to_ssavar(caller.function, caller.address, int(arg_num))
+        #             #_taint_param = caller.function.get_llil_at(caller.address).mlil.ssa_form.params[int(arg_num)-1]
+        #             if type(_taint_param) is MediumLevelILVarSsa:
+        #                 _ssavars.append(_taint_param.src)
+                
+        #         # print('function', caller.function)
+        #         source_group.add(caller.function)
+        #         tmp.append((caller.function, _ssavars))
+        #return source_group
+        pass
+
+    def get_backward_path(self, source: target, sink: target):
+        source
+        pass
 
     def get_call_sites_by_path(self, callgraph: callHierarchy):
         functions = dict()
@@ -300,7 +354,7 @@ class PathFinder():
         # attribute 데이터가 있으면 아래의 position 구하는 부분에서 error 발생하기 때문에 지워줌
         for _, _, call_sites in graph.edges(data=True):
             call_sites.clear()
-        
+
         pos = nx.nx_pydot.graphviz_layout(graph, prog='dot')
         nx.draw(graph, pos=pos, with_labels=True)
         nx.draw_networkx_edge_labels(graph, pos=pos, edge_labels=formatted_edge_labels)
@@ -311,5 +365,35 @@ class PathFinder():
         except:
             print('file save error!')
 
+
+    def show_graph(self, graph: nx.DiGraph):
+        
+        import networkx as nx
+        a = nx.DiGraph()
+
+        for start, end in graph.edges:
+            name1 = start.name if start.name is not None else str(start.addr)
+            name2 = end.name if end.name is not None else str(end.addr)
+            a.add_edge(name1, name2)
+
+        def show_using_pygraphviz(graph):
+            # graphviz 설치해야함. 맥에서는 brew로 설치가능
+            # 그 외 pygraphviz matplotlib을 pip로 설치
+            import matplotlib.pyplot as plt
+            pos = nx.nx_pydot.graphviz_layout(graph, prog='dot')
+            nx.draw(graph, pos=pos, with_labels=True)
+            plt.savefig('example.png')
+
+        def show_using_pyvis(graph):
+            # pyvis pip로 설치
+            from pyvis.network import Network
+            net = Network(directed=True, notebook=True)
+            net.from_nx(a)
+            net.show('example.html')
+
+        show_using_pygraphviz(a)
+        show_using_pyvis(a)
+
     def save_bndb_file_by_path(self):
+        # TODO: BinaryView에서 구한 path에 해당하는 부분을 highlight한 뒤 bndb 파일로 저장하기
         pass
