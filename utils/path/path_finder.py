@@ -1,7 +1,12 @@
 from binaryninja import *
 import networkx as nx
+from .node import *
+from .path_generator import *
 from dataclasses import dataclass
 import builtins
+import logging
+
+
 '''
 TODO: list
 - [ ] docstring format에 맞게 수정하기 및 영어로 작성
@@ -37,9 +42,6 @@ class callHierarchy:
     graph: nx.DiGraph
     # functions: dict
 
-class PathObj():
-    def __init__(self) -> None:
-        pass
 
 
 class PathFinder():
@@ -57,25 +59,89 @@ class PathFinder():
     - [x] call path 만들기 (단순 function - function)
     - [ ] call 간 호출 위치로 더 자세한 path 만들기 ( (function, call site, argument) - (function, call site, argument) )
     '''
-    def __init__(self, bv: BinaryView) -> None:
+    def __init__(self, bv: BinaryView, sources: list[PFEdge], sinks: list[PFEdge], option: PathGenOption=PathGenOption.DEFAULT) -> None:
         self.bv = bv
-        self.graph = nx.DiGraph() # entire graph
-        self.sources: list[target] = []
-        self.paths: list[callHierarchy] = []
-        self.tainted = dict()
+        self.option = option
+        self.graph = nx.MultiDiGraph() # entire graph with Function nodes
+        self.paths: list[PathObject] = []
+        self.sources: list[PFEdge] = sources
+        self.sinks: list[PFEdge] = sinks
 
         self._make_entire_call_graph()
 
     def _make_entire_call_graph(self):
         '''전체 function call graph 작성하기'''
         for func in self.bv.functions:
-            for caller in func.callers:
-                self.graph.add_edge(caller, func)
-            for callee in func.callees:
-                self.graph.add_edge(func, callee)
+            for caller in self.bv.get_code_refs(func.start): # is same as func.caller_sites
+                caller: ReferenceSource
+                self.graph.add_edge(caller.function, func, key=caller.address)
+            
+            for callee in func.call_sites:
+                callee: ReferenceSource
+                mlil = callee.function.get_llil_at(callee.address).mlil
+                if mlil is None:
+                    logging.debug(f'mlil is None at 0x{callee.address:x}, it will be a short jump or a tail call')
+                    continue
+
+                if mlil.operation != MediumLevelILOperation.MLIL_CALL or\
+                    type(mlil.dest) != MediumLevelILConstPtr:
+                    logging.debug(f'indirect call at 0x{callee.address:x}, or it will be a tail call')
+                    continue
+                
+                callee_function = self.bv.get_function_at(mlil.dest.constant)
+                if callee_function is None or func is None:
+                    logging.error(f'it will be architecture error at 0x{callee.address:x}')
+                    continue
+                    
+                # at here, we can expect to add function - function pairs with a call site edge to a multi-digraph.
+                logging.debug(f'Create entire MultiDiGraph, 0x{func.start:x} -> 0x{callee_function.start:x} at 0x{callee.address:x}')
+                self.graph.add_edge(func, callee_function, key=callee.address)
     
+        logging.debug(f'Creating entire MultiDiGraph is Done!')
+
+    def clear_all_user_values(self):
+        # TODO: performance improvement if it will not visit all entire functions
+        for func in self.bv.functions:
+            func.clear_all_user_var_values()
+
+    def generate_path(self):
+
+        # TODO: itertool 사용하기
+        for source in self.sources:
+            for sink in self.sinks:
+                source: PFEdge
+                sink: PFEdge
+
+                self.clear_all_user_values()
+
+                # source - sink 지점이 같은 함수 내에 존재하는 경우
+                if source.start.start == sink.start.start:
+                    logging.debug(f'find path! {source.start}')
+                    path_obj = PathObject(type=PathType.SINGLE_FUNCTION, path=None, head=source.start, source=source, sink=sink, option=self.option)
+                    self.paths.append(path_obj)
+
+                # source -> sink 선형인 경우
+                elif nx.has_path(self.graph, source.start, sink.start):
+                    logging.debug(f'find path! {source.start} -> {sink.start}')
+                    paths = nx.all_simple_edge_paths(self.graph, source.start, sink.start)
+                    for path in paths:
+                        path_obj = PathObject(type=PathType.LINEAR_NODES, path=path, head=source.start, source=source, sink=sink, option=self.option)
+                        self.paths.append(path_obj)
+
+                # tree node 형태인 경우
+                # TODO: 경로찾기
+                
+        return self.paths
+                
+
+
+    def update_soures_and_sinks(self, sources: list[PFEdge], sinks: list[PFEdge]):
+        self.sources = sources
+        self.sinks = sinks
+
+
     def get_related_vars_in_function(self, function: Function, vars: list[SSAVariable]) -> list[SSAVariable]:
-        '''
+        '''deprecated!
         하나의 함수 내에서 인자 var 값에 영향을 미치는 변수 중 path 내에 존재하는 모든 변수를 리스트 형태로 리턴함
 
         return : [<ssa rax_5 version 6>, <ssa var_11_1 version 1>, <ssa rax_4 version 5>, <ssa rax_3 version 4>, <ssa var_12 version 2>]
@@ -144,7 +210,8 @@ class PathFinder():
                     continue
 
                 # TODO: call 모든 인자 taint 리스트에 추가
-                
+
+                # TODO: return된 인자도 taint 리스트에 추가
 
                 taint.append(def_ref)
 
@@ -159,7 +226,7 @@ class PathFinder():
 
 
     def backward_analysis_from_target(self, target: target) -> set[Function]:
-        '''
+        '''deprecated!
         ### 000014b2      __isoc99_fscanf(stream: stdin, format: "%c", &var_12)
         When like above, the source_addr is 0x14b2 and the arg_idxs is [2] (var_12)
         '''
@@ -185,9 +252,9 @@ class PathFinder():
             tainted = self.get_related_vars_in_function(func, ssavars) # 해당 함수 내의 특정 변수들로 taint 된 변수 리스트 리턴
             print(ssavars, tainted)
             # TODO: save function's tainted varaible
-            if self.tainted.get(func) is None:
-                self.tainted[func] = dict()
-            self.tainted[func][tuple(ssavars)] = tainted
+            # if self.tainted.get(func) is None:
+            #     self.tainted[func] = dict()
+            # self.tainted[func][tuple(ssavars)] = tainted
             
             args = [(arg, arg.var.name.split('arg')[1]) for arg in tainted if arg.var.name.startswith('arg')]
             if len(args) < 1: # argument로 초기화된 변수가 없을 때는 패스
@@ -210,7 +277,8 @@ class PathFinder():
         return source_group
 
     def get_simple_path(self, source: target, sink: target) -> list[callHierarchy]:
-        '''source 부터 sink 까지 있을 수 있는 노드 그래프에서의 path 리턴'''
+        '''deprecated!!
+        source 부터 sink 까지 있을 수 있는 노드 그래프에서의 path 리턴'''
         source_group = self.backward_analysis_from_target(source)
         # print(source_group)
         result = []
@@ -266,80 +334,6 @@ class PathFinder():
         return result
 
 
-    def backward_analysis_from_target2(self, target: target) -> set[Function]:
-        '''
-        TODO: 각 노드를 target 타입으로 사용하는 새로운 backward analysis graph 생성함수
-        '''
-        # source_group = set()
-
-        # start = target.function
-        # ssavars = target.ssavars
-        # source_group.add(start)
-
-        # tmp = [(start, ssavars)]
-        # while len(tmp) > 0:
-        #     func, ssavars = tmp.pop()
-        #     tainted = self.get_related_vars_in_function(func, ssavars) # 해당 함수 내의 특정 변수들로 taint 된 변수 리스트 리턴
-        #     #print(tainted)
-
-        #     args = [(arg, arg.var.name.split('arg')[1]) for arg in tainted if arg.var.name.startswith('arg')]
-        #     if len(args) < 1: # argument로 초기화된 변수가 없을 때는 패스
-        #         continue
-
-        #     arg_nums = [arg_num for _, arg_num in args]
-        #     refs = self.bv.get_code_refs(func.start)
-        #     for caller in refs:
-        #         _ssavars = []
-        #         for arg_num in arg_nums:
-        #             _taint_param = self.param_idx_to_ssavar(caller.function, caller.address, int(arg_num))
-        #             #_taint_param = caller.function.get_llil_at(caller.address).mlil.ssa_form.params[int(arg_num)-1]
-        #             if type(_taint_param) is MediumLevelILVarSsa:
-        #                 _ssavars.append(_taint_param.src)
-                
-        #         # print('function', caller.function)
-        #         source_group.add(caller.function)
-        #         tmp.append((caller.function, _ssavars))
-        #return source_group
-        pass
-
-    def get_backward_path(self, source: target, sink: target):
-        source
-        pass
-
-    def get_call_sites_by_path(self, callgraph: callHierarchy):
-        functions = dict()
-        for start, end, data in callgraph.graph.edges(data=True):
-            print(start, end, data)
-            for call_site in data['call_sites']:
-                functions[end] = { call_site : [] }
-                instr :  mediumlevelil.MediumLevelILCallSsa = start.get_llil_at(call_site.address).mlil.ssa_form
-                
-                # 일반적인 함수 호출일 때
-                if instr.operation == MediumLevelILOperation.MLIL_CALL_SSA:
-                    for idx, param in enumerate(start.get_llil_at(call_site.address).mlil.ssa_form.params):
-                        # TODO: param type에 따라 처리하기
-                        if type(param) == MediumLevelILVarSsa:
-                            functions[end][call_site].append(
-                                ( f'arg{idx}', param.src, start.get_llil_at(call_site.address).mlil.ssa_form.get_ssa_var_possible_values(param.src) )
-                            )
-                        if type(param) == MediumLevelILConst:
-                            functions[end][call_site].append(
-                                ( f'arg{idx}', param, PossibleValueSet.constant(param.constant) )
-                            )
-        return functions
-    
-    def update_possibleValue(self, function: Function, ref: ReferenceSource, data: list[set]):
-        
-        function.clear_all_user_var_values()
-       
-        for name, ssavar, possiblevalue in data:
-            for instr in function.mlil.ssa_form.basic_blocks[0]:
-                if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA and \
-                    type(instr.src) == MediumLevelILVarSsa:
-                    instr.src.src.var.name: str
-                    if instr.src.src.var.name.startswith(name):
-                        var = instr.dest.var
-                        function.set_user_var_value(var=var, def_addr=instr.address, value=possiblevalue)
     
 
     def save_path_to_image(self, graph: nx.DiGraph, file: str):
@@ -366,33 +360,48 @@ class PathFinder():
             print('file save error!')
 
 
-    def show_graph(self, graph: nx.DiGraph):
-        
-        import networkx as nx
-        a = nx.DiGraph()
+    def save_entire_graph(self, graph: nx.MultiDiGraph):
 
-        for start, end in graph.edges:
+        a = nx.MultiDiGraph()
+        
+        for start, end in graph.edges():
             name1 = start.name if start.name is not None else str(start.addr)
             name2 = end.name if end.name is not None else str(end.addr)
             a.add_edge(name1, name2)
 
-        def show_using_pygraphviz(graph):
-            # graphviz 설치해야함. 맥에서는 brew로 설치가능
-            # 그 외 pygraphviz matplotlib을 pip로 설치
-            import matplotlib.pyplot as plt
-            pos = nx.nx_pydot.graphviz_layout(graph, prog='dot')
-            nx.draw(graph, pos=pos, with_labels=True)
-            plt.savefig('example.png')
+        from pyvis.network import Network
+        net = Network(directed=True)
+        net.from_nx(a)
+        net.show(f'{self.bv.file.original_filename.split("/")[-1]}_entire_graph.html')
 
-        def show_using_pyvis(graph):
-            # pyvis pip로 설치
-            from pyvis.network import Network
-            net = Network(directed=True, notebook=True)
-            net.from_nx(a)
-            net.show('example.html')
 
-        show_using_pygraphviz(a)
-        show_using_pyvis(a)
+    # def show_graph(self, graph: nx.DiGraph):
+        
+    #     import networkx as nx
+    #     a = nx.DiGraph()
+
+    #     for start, end in graph.edges:
+    #         name1 = start.name if start.name is not None else str(start.addr)
+    #         name2 = end.name if end.name is not None else str(end.addr)
+    #         a.add_edge(name1, name2)
+
+    #     def show_using_pygraphviz(graph):
+    #         # graphviz 설치해야함. 맥에서는 brew로 설치가능
+    #         # 그 외 pygraphviz matplotlib을 pip로 설치
+    #         import matplotlib.pyplot as plt
+    #         pos = nx.nx_pydot.graphviz_layout(graph, prog='dot')
+    #         nx.draw(graph, pos=pos, with_labels=True)
+    #         plt.savefig('example.png')
+
+    #     def show_using_pyvis(graph):
+    #         # pyvis pip로 설치
+    #         from pyvis.network import Network
+    #         net = Network(directed=True, notebook=True)
+    #         net.from_nx(a)
+    #         net.show('example.html')
+
+    #     show_using_pygraphviz(a)
+    #     show_using_pyvis(a)
 
     def save_bndb_file_by_path(self):
         # TODO: BinaryView에서 구한 path에 해당하는 부분을 highlight한 뒤 bndb 파일로 저장하기
