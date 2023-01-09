@@ -93,13 +93,13 @@ class PathFinder():
                     continue
                     
                 # at here, we can expect to add function - function pairs with a call site edge to a multi-digraph.
-                logging.debug(f'Create entire MultiDiGraph, 0x{func.start:x} -> 0x{caller_function.start:x} at 0x{caller.address:x}')
+                logging.debug(f'Create entire MultiDiGraph, {func.name if func.name is not None else hex(func.start)} -> 0x{caller_function.name if caller_function.name is not None else hex(caller_function.start)} at {caller.address:#x}')
                 self.graph.add_edge(caller.function, func, key=caller.address)
             
             for callee in func.call_sites:
                 callee: ReferenceSource
                 mlil = callee.function.get_llil_at(callee.address).mlil
-                
+
                 if mlil is None:
                     logging.debug(f'mlil is None at 0x{callee.address:x}, it will be a short jump or a tail call')
                     continue
@@ -115,7 +115,7 @@ class PathFinder():
                     continue
                     
                 # at here, we can expect to add function - function pairs with a call site edge to a multi-digraph.
-                logging.debug(f'Create entire MultiDiGraph, 0x{func.start:x} -> 0x{callee_function.start:x} at 0x{callee.address:x}')
+                logging.debug(f'Create entire MultiDiGraph, {func.name if func.name is not None else hex(func.start)} -> 0x{callee_function.name if callee_function.name is not None else hex(callee_function.start)} at {callee.address:#x}')
                 self.graph.add_edge(func, callee_function, key=callee.address)
     
         logging.debug(f'Creating entire MultiDiGraph is Done!')
@@ -382,11 +382,11 @@ class PathFinder():
             print('file save error!')
 
 
-    def save_entire_graph(self, graph: nx.MultiDiGraph):
+    def save_entire_graph(self, filename:str = None):
 
         a = nx.MultiDiGraph()
         
-        for start, end in graph.edges():
+        for start, end in self.graph.edges():
             name1 = start.name if start.name is not None else str(start.addr)
             name2 = end.name if end.name is not None else str(end.addr)
             a.add_edge(name1, name2)
@@ -394,7 +394,7 @@ class PathFinder():
         from pyvis.network import Network
         net = Network(directed=True)
         net.from_nx(a)
-        net.show(f'{self.bv.file.original_filename.split("/")[-1]}_entire_graph.html')
+        net.show(f'{filename if filename is not None else str(uuid.uuid4())}')
 
 
     # def show_graph(self, graph: nx.DiGraph):

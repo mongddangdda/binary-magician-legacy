@@ -274,5 +274,20 @@ def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PEdge]:
         xrefs = bv.get_code_refs(functions[0].start)
         for ref in xrefs:
             ref: ReferenceSource
+
+            mlil = ref.function.get_llil_at(ref.address).mlil
+
+            if mlil is None:
+                continue
+
+            if mlil.operation != MediumLevelILOperation.MLIL_CALL or\
+                type(mlil.dest) != MediumLevelILConstPtr:
+                continue
+            
+            caller_function = bv.get_function_at(mlil.dest.constant)
+            if caller_function is None:
+                continue
+
             result.append( PEdge(start=ref.function, address=ref.address, taint_args=taint_args) )
+        
     return result

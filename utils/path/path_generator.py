@@ -49,8 +49,6 @@ class PathObject():
         else:
             logging.error(f'Please use this class with right type')
             raise NotImplemented
-
-        self.show_pathobject()
         
 
     def is_single_function(self):
