@@ -22,7 +22,8 @@ class PathGenOption(Flag):
 
 
 class PathObject():
-    def __init__(self, type: PathType, path: None|list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PFEdge, sink: PFEdge, option: PathGenOption) -> None:
+    def __init__(self, bv: BinaryView, type: PathType, path: None|list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PFEdge, sink: PFEdge, option: PathGenOption) -> None:
+        self.bv = bv
         self.type = type
         self.name = str(uuid.uuid4()) # FIXME: change name?
         self.option = option
@@ -36,6 +37,7 @@ class PathObject():
         self.nodes = dict() # { Function: PFNode }
         self.edges = dict() # { call_site_address int : PFEdge }
 
+        self.highlight_addr: dict[Function, list[int]] = dict()
 
         if self.type == PathType.SINGLE_FUNCTION:
             self.generate_single_node()
@@ -178,6 +180,9 @@ class PathObject():
         visited = []
         taint = []
         
+        # for highlighting
+        self.highlight_addr[function] = list()
+
         # TODO: var use 하는 곳 definition 추가하기
         for var in vars:
             taint.append( function.mlil.ssa_form.get_ssa_var_definition(var) )
@@ -185,11 +190,15 @@ class PathObject():
         while len(taint) > 0:
             track_var = taint.pop()
 
+            
             # TODO: path 내에 존재하는지 확인
             # bb = bv.get_basic_blocks_at(track_var.address)
             # if not path.has_node(bb):
             #     continue
-
+            
+            # for highlighting
+            self.highlight_addr[function].append(track_var.address)
+            
 
             if track_var in visited:
                 continue
@@ -340,3 +349,15 @@ class PathObject():
             net.show(self.name + '.html')
         else:
             net.show(f'{filename}.html')
+    
+    def save_bndb_file_by_path(self, filename: str = None):
+        name = filename
+        if filename is None:
+            name = self.name
+        
+        for func, instr_addrs in self.highlight_addr.items():
+            for instr_addr in instr_addrs:
+                func.set_user_instr_highlight(addr=instr_addr, color=HighlightStandardColor.BlueHighlightColor)
+        
+        settings = SaveSettings()
+        self.bv.file.create_database(f"{name}.bndb", None, settings)

@@ -117,7 +117,7 @@ class PathFinder():
                 # source - sink 지점이 같은 함수 내에 존재하는 경우
                 if source.start.start == sink.start.start:
                     logging.debug(f'find path! {source.start}')
-                    path_obj = PathObject(type=PathType.SINGLE_FUNCTION, path=None, head=source.start, source=source, sink=sink, option=self.option)
+                    path_obj = PathObject(bv=self.bv, type=PathType.SINGLE_FUNCTION, path=None, head=source.start, source=source, sink=sink, option=self.option)
                     self.paths.append(path_obj)
 
                 # source -> sink 선형인 경우
@@ -125,7 +125,7 @@ class PathFinder():
                     logging.debug(f'find path! {source.start} -> {sink.start}')
                     paths = nx.all_simple_edge_paths(self.graph, source.start, sink.start)
                     for path in paths:
-                        path_obj = PathObject(type=PathType.LINEAR_NODES, path=path, head=source.start, source=source, sink=sink, option=self.option)
+                        path_obj = PathObject(bv=self.bv, type=PathType.LINEAR_NODES, path=path, head=source.start, source=source, sink=sink, option=self.option)
                         self.paths.append(path_obj)
 
                 # tree node 형태인 경우
@@ -403,6 +403,3 @@ class PathFinder():
     #     show_using_pygraphviz(a)
     #     show_using_pyvis(a)
 
-    def save_bndb_file_by_path(self):
-        # TODO: BinaryView에서 구한 path에 해당하는 부분을 highlight한 뒤 bndb 파일로 저장하기
-        pass
