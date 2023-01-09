@@ -12,6 +12,7 @@ source_targets = {
 }
 
 sink_targets = {
+    'puts': [0],
     'fprintf': [1],
     'printf': [0],
     'sprintf': [1],
