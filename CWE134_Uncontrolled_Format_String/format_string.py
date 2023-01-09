@@ -13,7 +13,13 @@ source_targets = {
 
 sink_targets = {
     'fprintf': [1],
-    'printf': [0]
+    'printf': [0],
+    'sprintf': [1],
+    'snprintf': [2],
+    'vprintf': [0],
+    'vfprintf': [1],
+    'vsprintf': [1],
+    'vnsprintf': [2]
 }
 
 def solution(bv: BinaryView, path: PathObject):
