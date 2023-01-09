@@ -265,7 +265,7 @@ def get_call_graph_source_sink1(bv: BinaryView, source: Function, sink: Function
 def update_possible_value(call_path):
     return call_path
 
-def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PFEdge]:
+def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PEdge]:
     result = []
     for func_name, taint_args in targets.items():
         functions = bv.get_functions_by_name(func_name)
@@ -274,5 +274,5 @@ def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PFEdge]:
         xrefs = bv.get_code_refs(functions[0].start)
         for ref in xrefs:
             ref: ReferenceSource
-            result.append( PFEdge(start=ref.function, address=ref.address, taint_args=taint_args) )
+            result.append( PEdge(start=ref.function, address=ref.address, taint_args=taint_args) )
     return result

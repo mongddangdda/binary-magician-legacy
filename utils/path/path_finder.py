@@ -59,26 +59,47 @@ class PathFinder():
     - [x] call path 만들기 (단순 function - function)
     - [ ] call 간 호출 위치로 더 자세한 path 만들기 ( (function, call site, argument) - (function, call site, argument) )
     '''
-    def __init__(self, bv: BinaryView, sources: list[PFEdge], sinks: list[PFEdge], option: PathGenOption=PathGenOption.DEFAULT) -> None:
+    def __init__(self, bv: BinaryView, sources: list[PEdge], sinks: list[PEdge], option: PathGenOption=PathGenOption.DEFAULT) -> None:
         self.bv = bv
         self.option = option
         self.graph = nx.MultiDiGraph() # entire graph with Function nodes
         self.paths: list[PathObject] = []
-        self.sources: list[PFEdge] = sources
-        self.sinks: list[PFEdge] = sinks
+        self.sources: list[PEdge] = sources
+        self.sinks: list[PEdge] = sinks
 
         self._make_entire_call_graph()
 
     def _make_entire_call_graph(self):
         '''전체 function call graph 작성하기'''
+
+
         for func in self.bv.functions:
             for caller in self.bv.get_code_refs(func.start): # is same as func.caller_sites
                 caller: ReferenceSource
+                mlil = caller.function.get_llil_at(caller.address).mlil
+
+                if mlil is None:
+                    logging.debug(f'mlil is None at 0x{caller.address:x}, it will be a short jump or a tail call')
+                    continue
+
+                if mlil.operation != MediumLevelILOperation.MLIL_CALL or\
+                    type(mlil.dest) != MediumLevelILConstPtr:
+                    logging.debug(f'indirect call at 0x{caller.address:x}, or it will be a tail call')
+                    continue
+                
+                caller_function = self.bv.get_function_at(mlil.dest.constant)
+                if caller_function is None or func is None:
+                    logging.error(f'it will be architecture error at 0x{caller.address:x}')
+                    continue
+                    
+                # at here, we can expect to add function - function pairs with a call site edge to a multi-digraph.
+                logging.debug(f'Create entire MultiDiGraph, 0x{func.start:x} -> 0x{caller_function.start:x} at 0x{caller.address:x}')
                 self.graph.add_edge(caller.function, func, key=caller.address)
             
             for callee in func.call_sites:
                 callee: ReferenceSource
                 mlil = callee.function.get_llil_at(callee.address).mlil
+                
                 if mlil is None:
                     logging.debug(f'mlil is None at 0x{callee.address:x}, it will be a short jump or a tail call')
                     continue
@@ -109,8 +130,8 @@ class PathFinder():
         # TODO: itertool 사용하기
         for source in self.sources:
             for sink in self.sinks:
-                source: PFEdge
-                sink: PFEdge
+                source: PEdge
+                sink: PEdge
 
                 self.clear_all_user_values()
 
@@ -128,14 +149,13 @@ class PathFinder():
                         path_obj = PathObject(bv=self.bv, type=PathType.LINEAR_NODES, path=path, head=source.start, source=source, sink=sink, option=self.option)
                         self.paths.append(path_obj)
 
-                # tree node 형태인 경우
-                # TODO: 경로찾기
+                # TODO: tree node 형태인 경우
                 
         return self.paths
                 
 
 
-    def update_soures_and_sinks(self, sources: list[PFEdge], sinks: list[PFEdge]):
+    def update_soures_and_sinks(self, sources: list[PEdge], sinks: list[PEdge]):
         self.sources = sources
         self.sinks = sinks
 
@@ -337,7 +357,9 @@ class PathFinder():
     
 
     def save_path_to_image(self, graph: nx.DiGraph, file: str):
-        '''source - sink path를 이미지로 저장하기'''
+        '''deprecated
+        source - sink path를 이미지로 저장하기
+        '''
         edge_labels = nx.get_edge_attributes(graph, 'call_sites')
 
         def make_edge_name(call_sites):
