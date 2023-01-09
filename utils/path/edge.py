@@ -4,7 +4,7 @@ import logging
 import pprint
 
 class PEdge:
-    def __init__(self, start=None, end=None, address=None, taint_args=None) -> None:
+    def __init__(self, start: Function = None, end: Function = None, address: int = None, taint_args: list[int] = None) -> None:
         assert start is not None and address is not None
         
         self.start: Function = start
@@ -24,6 +24,8 @@ class PEdge:
 
         # initialize empty attributes
         self.instr = self.start.get_llil_at(self.address).mlil
+        assert self.instr is not None
+
         self.initialize_param()
 
     def __hash__(self) -> int:
@@ -74,7 +76,8 @@ class PEdge:
                     key = f'arg{int(name.split("arg")[1]) - 1}' # in binary ninja name rules, it start at arg1, but arg0 in this framwork.
                     var = instr.dest.var
                     possible_value: Parameter = self.parameters[key]
-                    self.end.set_user_var_value(var=var, def_addr=instr.address, value=possible_value.possible_value)
+                    if type(possible_value) is PossibleValueSet:
+                        self.end.set_user_var_value(var=var, def_addr=instr.address, value=possible_value.possible_value)
 
     def get_ssavars_to_taint(self) -> list[SSAVariable]:
         # taint 할 argument 중에서 ssavar 리턴하기

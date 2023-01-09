@@ -71,14 +71,35 @@ class PathFinder():
 
     def _make_entire_call_graph(self):
         '''전체 function call graph 작성하기'''
+
+
         for func in self.bv.functions:
             for caller in self.bv.get_code_refs(func.start): # is same as func.caller_sites
                 caller: ReferenceSource
+                mlil = caller.function.get_llil_at(caller.address).mlil
+
+                if mlil is None:
+                    logging.debug(f'mlil is None at 0x{caller.address:x}, it will be a short jump or a tail call')
+                    continue
+
+                if mlil.operation != MediumLevelILOperation.MLIL_CALL or\
+                    type(mlil.dest) != MediumLevelILConstPtr:
+                    logging.debug(f'indirect call at 0x{caller.address:x}, or it will be a tail call')
+                    continue
+                
+                caller_function = self.bv.get_function_at(mlil.dest.constant)
+                if caller_function is None or func is None:
+                    logging.error(f'it will be architecture error at 0x{caller.address:x}')
+                    continue
+                    
+                # at here, we can expect to add function - function pairs with a call site edge to a multi-digraph.
+                logging.debug(f'Create entire MultiDiGraph, 0x{func.start:x} -> 0x{caller_function.start:x} at 0x{caller.address:x}')
                 self.graph.add_edge(caller.function, func, key=caller.address)
             
             for callee in func.call_sites:
                 callee: ReferenceSource
                 mlil = callee.function.get_llil_at(callee.address).mlil
+                
                 if mlil is None:
                     logging.debug(f'mlil is None at 0x{callee.address:x}, it will be a short jump or a tail call')
                     continue
