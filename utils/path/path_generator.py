@@ -151,30 +151,35 @@ class PathObject():
                 edge.taint_args = tmp
             
             ssavar = edge.get_ssavars_to_taint()
-            tainted = self.get_related_vars_in_function(function=edge.start, vars=ssavar)
+            stack_vars, global_vars, heap_vars = self.get_related_vars_in_function(function=edge.start, vars=ssavar)
             if type == 'sink':
-                self.nodes[edge.start].tainted_vars_from_sink = tainted
+                self.nodes[edge.start].tainted_vars_from_sink = stack_vars
             elif type == 'source':
-                self.nodes[edge.start].tainted_vars_from_source = tainted
-            tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in tainted if arg.var.name.startswith('arg')]
+                self.nodes[edge.start].tainted_vars_from_source = stack_vars
+            self.nodes[edge.start].global_vars = global_vars
+            self.nodes[edge.start].heap_vars = heap_vars
+
+            tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in stack_vars if arg.var.name.startswith('arg')]
 
     def generate_tree_nodes(self, source_path:list[tuple], sink_path:list[tuple]):
         # TODO:
         logging.debug(f'Head: {self.head_function.name}, Source: {self.source.start.name}, Sink: {self.sink.start.name}')
         
 
-    def get_related_vars_in_function(self, function: Function, vars: list[SSAVariable]) -> list[SSAVariable]:
+    def get_related_vars_in_function(self, function: Function, vars: list[SSAVariable]) -> tuple[list[SSAVariable], list[MediumLevelILConstPtr], list[SSAVariable]]:
         '''
-        하나의 함수 내에서 인자 var 값에 영향을 미치는 변수 중 path 내에 존재하는 모든 변수를 리스트 형태로 리턴함
+        하나의 함수 내에서 주어진 SSAVariable와 관련된 모든 변수를 리턴.
+        리턴 형태는 (stack, global, heap) 형태
 
-        return : [<ssa rax_5 version 6>, <ssa var_11_1 version 1>, <ssa rax_4 version 5>, <ssa rax_3 version 4>, <ssa var_12 version 2>]
         TODO: 
         1. function call의 인자일 때, 다른 인자들을 다 taint로 하기
            - function dataflow analysis를 적용하여 인자간 taint 관계 찾기
         2. 현재로써는 실제 실행가능한 basic block을 구분하지 못함
            - function 내 dataflow analysis 적용
         '''
-        result = []
+        stack_vars = []
+        global_vars = []
+        heap_vars = []
 
         visited = []
         taint = []
@@ -198,6 +203,8 @@ class PathObject():
             # for highlighting
             self.highlight_addr[function].append(track_var.address)
             
+            # TODO: 전역변수 처리하기
+            
 
             if track_var in visited:
                 continue
@@ -217,6 +224,12 @@ class PathObject():
                     continue
                 if track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
                     continue
+                if track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
+                    # TODO: 전역변수 처리
+                    # global variable과 heap variable 구분하도록 리턴타입 변경
+                    if track_var.src.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
+                        global_vars.append(track_var.src.src)
+                    continue
                 # src trace
                 var = track_var.src.ssa_form
 
@@ -235,7 +248,7 @@ class PathObject():
                 while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
                     var = var.src
                 
-                result.append(var)
+                stack_vars.append(var)
                 def_ref = track_var.ssa_form.function.get_ssa_var_definition(var)
                 if def_ref == None:
                     continue
@@ -246,7 +259,7 @@ class PathObject():
 
                 taint.append(def_ref)
 
-        return result
+        return (stack_vars, global_vars, heap_vars)
 
 
     # def get_simple_path(self, source: target, sink: target) -> list[callHierarchy]:

@@ -14,6 +14,9 @@ class PNode:
         self.next_at: PEdge = None
         self.tainted_vars_from_source: list[SSAVariable] = []
         self.tainted_vars_from_sink: list[SSAVariable] = []
+
+        self.global_vars = [] # TODO:
+        self.heap_vars = [] # TODO:
     
 
     def __hash__(self) -> int:
@@ -32,6 +35,6 @@ class PNode:
         else:
             result += f'next_at: None\n'
         
-        result += f'tainted_from_source: {self.tainted_vars_from_source}\ntainted_from_sink: {self.tainted_vars_from_sink}\n'
+        result += f'tainted_from_source: {self.tainted_vars_from_source}\ntainted_from_sink: {self.tainted_vars_from_sink}\nglobal_vars: {self.global_vars}\nheap_vars: {self.heap_vars}\n'
         result += f'#######################################\n'
         return result
