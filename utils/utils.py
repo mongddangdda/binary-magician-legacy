@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from utils.path.node import *
 from binaryninja.binaryview import BinaryViewType
 from binaryninja import *
 import networkx as nx
@@ -263,3 +264,15 @@ def get_call_graph_source_sink1(bv: BinaryView, source: Function, sink: Function
 
 def update_possible_value(call_path):
     return call_path
+
+def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PFEdge]:
+    result = []
+    for func_name, taint_args in targets.items():
+        functions = bv.get_functions_by_name(func_name)
+        if len(functions) < 1:
+            continue
+        xrefs = bv.get_code_refs(functions[0].start)
+        for ref in xrefs:
+            ref: ReferenceSource
+            result.append( PFEdge(start=ref.function, address=ref.address, taint_args=taint_args) )
+    return result
