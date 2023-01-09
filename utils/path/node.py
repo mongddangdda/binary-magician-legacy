@@ -91,7 +91,8 @@ class PFEdge:
             arg: int
             key = f'arg{arg}'
             param: Parameter = self.parameters[key]
-            ssavars.append(param.ssavar)
+            if param.ssavar is not None:
+                ssavars.append(param.ssavar)
         return ssavars
 
 class PFNode:
