@@ -19,23 +19,24 @@ class PathType(Enum):
 class PathGenOption(Flag):
     DEFAULT = auto()
     POSSIBLE_VALUE_UPDATE = auto()
+    CHECK_FEASIBLE = auto()
 
 
 class PathObject():
-    def __init__(self, bv: BinaryView, type: PathType, path: None|list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PFEdge, sink: PFEdge, option: PathGenOption) -> None:
+    def __init__(self, bv: BinaryView, type: PathType, path: None|list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PEdge, sink: PEdge, option: PathGenOption) -> None:
         self.bv = bv
         self.type = type
         self.name = str(uuid.uuid4()) # FIXME: change name?
         self.option = option
         self.path: None|list[tuple]|tuple[list[tuple]] = path # when single|linear|tree
-        self.graph = nx.DiGraph() # with PFNodes
+        self.graph = nx.DiGraph() # with PNodes
         self.head_function: Function = head
-        self.head: PFNode
-        self.source: PFEdge = source
-        self.sink: PFEdge = sink
+        self.head: PNode
+        self.source: PEdge = source
+        self.sink: PEdge = sink
 
-        self.nodes = dict() # { Function: PFNode }
-        self.edges = dict() # { call_site_address int : PFEdge }
+        self.nodes = dict() # { Function: PNode }
+        self.edges = dict() # { call_site_address int : PEdge }
 
         self.highlight_addr: dict[Function, list[int]] = dict()
 
@@ -66,7 +67,7 @@ class PathObject():
     def generate_single_node(self):
         logging.debug(f'source node and sink are same at {self.source.start}')
 
-        node = PFNode(self.source.start)
+        node = PNode(self.source.start)
         self.nodes[self.source.start] = node
         self.head = node
 
@@ -88,7 +89,7 @@ class PathObject():
             end: Function
             call_site_address: int
 
-            edge = PFEdge(start=start, end=end, address=call_site_address)
+            edge = PEdge(start=start, end=end, address=call_site_address)
 
             if PathGenOption.POSSIBLE_VALUE_UPDATE in self.option:
                 edge.update_possible_value()
@@ -97,14 +98,14 @@ class PathObject():
 
             # node initial set up
             if self.nodes.get(start) is None:
-                _node = PFNode(start)
+                _node = PNode(start)
                 self.nodes[start] = _node
             if self.nodes.get(end) is None:
-                _node = PFNode(end)
+                _node = PNode(end)
                 self.nodes[end] = _node
 
-            start_node: PFNode = self.nodes.get(edge.start)
-            end_node: PFNode = self.nodes.get(edge.end)
+            start_node: PNode = self.nodes.get(edge.start)
+            end_node: PNode = self.nodes.get(edge.end)
 
             start_node.next = end_node
             start_node.next_at = edge
@@ -126,8 +127,8 @@ class PathObject():
     def make_graph(self):
 
         for _, edge in self.edges.items():
-            start_node: PFNode = self.nodes.get(edge.start)
-            end_node: PFNode = self.nodes.get(edge.end)
+            start_node: PNode = self.nodes.get(edge.start)
+            end_node: PNode = self.nodes.get(edge.end)
 
             self.graph.add_edge(start_node, end_node, call_site=edge)
 
@@ -312,6 +313,11 @@ class PathObject():
         result += f'{RED}Full Path : '
         if self.type == PathType.SINGLE_FUNCTION:
             result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
+            result += f'{END}\n'
+            result += f'{GREEN}{self.head}{END}\n'
+            result += f'{YELLOW}SOURCE:{self.source}{END}\n'
+            result += f'{YELLOW}SINK:{self.sink}{END}\n'
+
         elif self.type == PathType.LINEAR_NODES:
             result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
             for _, end, _ in self.path:
@@ -323,7 +329,11 @@ class PathObject():
                 result += f'{YELLOW}{self.edges.get(call_site)}{END}'
             result += f'{GREEN}{self.nodes.get(self.sink.start)}{END}'
             result += f'{YELLOW}{self.sink}{END}'
+
         elif self.type == PathType.TREE_NODES:
+            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
+            result += f'{END}\n'
+            result += f'SORRY NOT IMPLEMENTED YET!'
             pass
 
         result += '\n'
@@ -336,8 +346,8 @@ class PathObject():
         a = nx.DiGraph()
 
         for start, end in self.graph.edges:
-            start: PFNode
-            end: PFNode
+            start: PNode
+            end: PNode
             
             name1 = start.function.name if start.function.name is not None else f'{start.function.start:#x}'
             name2 = end.function.name if end.function.name is not None else f'{end.function.start:#x}'
