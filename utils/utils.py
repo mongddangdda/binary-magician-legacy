@@ -267,6 +267,7 @@ def update_possible_value(call_path):
 
 def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PEdge]:
     result = []
+
     for func_name, taint_args in targets.items():
         functions = bv.get_functions_by_name(func_name)
         if len(functions) < 1:
@@ -290,4 +291,23 @@ def make_targets(bv: BinaryView, targets: dict[str, list[int]]) -> list[PEdge]:
 
             result.append( PEdge(start=ref.function, address=ref.address, taint_args=taint_args) )
         
+    return result
+
+def make_arithmetic_targets(bv: BinaryView) -> list[PEdge]:
+    result = []
+
+    for func in bv.functions:
+        for inst in func.mlil.ssa_form.instructions:
+            if inst.operation is MediumLevelILOperation.MLIL_SET_VAR_SSA:
+
+                if inst.src.operation not in (MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_MUL):
+                    continue
+
+                if inst.src.operation == MediumLevelILOperation.MLIL_ADD:
+                    # when A = B + C, taint_args -> [0, 1, 2]
+                    result.append(PEdge(start=func, address=inst.address, taint_args=[0,1,2]))
+                elif inst.src.operation == MediumLevelILOperation.MLIL_MUL:
+                    # when A = B * C, taint_args -> [0, 1, 2]
+                    result.append(PEdge(start=func, address=inst.address, taint_args=[0,1,2]))
+
     return result
