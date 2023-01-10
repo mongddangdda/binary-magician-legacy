@@ -1,6 +1,7 @@
 from utils.utils import *
 from utils.path.path_finder import *
 from binaryninja import *
+from utils.angr_manager import AngrManager
 import logging
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
@@ -25,4 +26,7 @@ if __name__ == '__main__':
         path.show_pathobject() # for debug, you can view all element of node and edge
         #path.save_graph() # if name is None, filename is random
         #path.save_bndb_file_by_path()
-        solution(bv, path)
+
+        angr_manager = AngrManager(path=path)
+        if angr_manager.check_feasible():
+            solution(bv, path)
