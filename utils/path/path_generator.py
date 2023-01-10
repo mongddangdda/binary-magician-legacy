@@ -151,13 +151,19 @@ class PathObject():
                 edge.taint_args = tmp
             
             ssavar = edge.get_ssavars_to_taint()
-            stack_vars, global_vars, heap_vars = self.get_related_vars_in_function(function=edge.start, vars=ssavar)
+            
             if type == 'sink':
+                stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
                 self.nodes[edge.start].tainted_vars_from_sink = stack_vars
+                self.nodes[edge.start].global_vars.extend(global_vars)
+                self.nodes[edge.start].heap_vars.extend(heap_vars)
             elif type == 'source':
-                self.nodes[edge.start].tainted_vars_from_source = stack_vars
-            self.nodes[edge.start].global_vars = global_vars
-            self.nodes[edge.start].heap_vars = heap_vars
+                stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                stack_vars2, global_vars2, heap_vars2 = self.get_related_vars_in_function_forward(function=edge.start, vars=stack_vars)
+
+                self.nodes[edge.start].tainted_vars_from_source = stack_vars + stack_vars2
+                self.nodes[edge.start].global_vars.extend(global_vars + global_vars2)
+                self.nodes[edge.start].heap_vars.extend(heap_vars + heap_vars2)
 
             tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in stack_vars if arg.var.name.startswith('arg')]
 
@@ -166,7 +172,106 @@ class PathObject():
         logging.debug(f'Head: {self.head_function.name}, Source: {self.source.start.name}, Sink: {self.sink.start.name}')
         
 
-    def get_related_vars_in_function(self, function: Function, vars: list[SSAVariable]) -> tuple[list[SSAVariable], list[MediumLevelILConstPtr], list[SSAVariable]]:
+    def get_related_vars_in_function_forward(self, function: Function, vars: list[SSAVariable]) -> tuple[list[SSAVariable], list[MediumLevelILConstPtr], list[SSAVariable]]:
+        '''
+        하나의 함수 내에서 주어진 SSAVariable와 관련된 모든 변수를 리턴.
+        리턴 형태는 (stack, global, heap) 형태
+
+        TODO: 
+        1. function call의 인자일 때, 다른 인자들을 다 taint로 하기
+           - function dataflow analysis를 적용하여 인자간 taint 관계 찾기
+        2. 현재로써는 실제 실행가능한 basic block을 구분하지 못함
+           - function 내 dataflow analysis 적용
+        '''
+        stack_vars = []
+        global_vars = []
+        heap_vars = []
+
+        visited = []
+        taint = []
+
+        # for highlighting
+        self.highlight_addr[function] = list()
+
+        stack_vars.extend(vars)
+
+        for var in vars:
+            for use in function.mlil.ssa_form.get_ssa_var_uses(var):
+                taint.append( use )
+
+        while len(taint) > 0:
+            track_var = taint.pop()
+
+            # TODO: path 내에 존재하는지 확인
+            # bb = bv.get_basic_blocks_at(track_var.address)
+            # if not path.has_node(bb):
+            #     continue
+            
+            # for highlighting
+            self.highlight_addr[function].append(track_var.address)
+            
+            # TODO: 전역변수 처리하기
+            
+
+            if track_var in visited:
+                continue
+
+            visited.append(track_var)
+
+
+            if track_var.operation not in ( MediumLevelILOperation.MLIL_SET_VAR_SSA, MediumLevelILOperation.MLIL_SET_VAR, \
+            MediumLevelILOperation.MLIL_VAR_PHI, MediumLevelILOperation.MLIL_STORE_SSA ):
+                continue
+
+            if track_var.operation == MediumLevelILOperation.MLIL_STORE_SSA:
+                if track_var.dest.operation == MediumLevelILOperation.MLIL_CONST_PTR:
+                    # FIXME: global 변수와 연산을 하는 케이스, global 변수가 use 되는 케이스 추가하기
+                    global_vars.append(track_var.dest)
+                    continue
+
+            elif track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
+            track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+            # SET_VAR인 경우 
+                if type(track_var.dest) == SSAVariable:
+                    stack_vars.append(track_var.dest)
+                    uses = track_var.ssa_form.function.get_ssa_var_uses(track_var.dest)
+                    for use in uses:
+                        taint.append(use)
+                    continue
+
+                var = track_var.src.ssa_form
+                if var.operation == MediumLevelILOperation.MLIL_ADD or \
+                    var.operation == MediumLevelILOperation.MLIL_SUB or \
+                    var.operation == MediumLevelILOperation.MLIL_MUL or \
+                    var.operation == MediumLevelILOperation.MLIL_DIVS:
+                        #src가 operation인 경우, VAR 참조
+                    if var.left.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                        var = var.left
+                    else:
+                        var = var.right
+                while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
+                    var = var.src
+                
+                stack_vars.append(var)
+                uses = track_var.ssa_form.function.get_ssa_var_uses(var)
+
+                # TODO: call 모든 인자 taint 리스트에 추가, a = sub(b) 형태
+                # TODO: return된 인자도 taint 리스트에 추가
+                for use in uses:
+                    taint.append(use)
+
+            # TODO: call 모든 인자 taint 리스트에 추가, sub(b) 형태
+            elif track_var.operation == MediumLevelILOperation.MLIL_CALL_SSA:
+                pass
+                # TODO: return된 인자도 taint 리스트에 추가
+
+        
+        return (stack_vars, global_vars, heap_vars)
+
+
+
+
+    def get_related_vars_in_function_backward(self, function: Function, vars: list[SSAVariable]) -> tuple[list[SSAVariable], list[MediumLevelILConstPtr], list[SSAVariable]]:
         '''
         하나의 함수 내에서 주어진 SSAVariable와 관련된 모든 변수를 리턴.
         리턴 형태는 (stack, global, heap) 형태
@@ -186,6 +291,8 @@ class PathObject():
         
         # for highlighting
         self.highlight_addr[function] = list()
+
+        stack_vars.extend(vars)
 
         # TODO: var use 하는 곳 definition 추가하기
         for var in vars:
@@ -222,9 +329,9 @@ class PathObject():
                 if track_var.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
                     #SET_VAR의 src가 CONST_PTR인 경우
                     continue
-                if track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
                     continue
-                if track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
                     # TODO: 전역변수 처리
                     # global variable과 heap variable 구분하도록 리턴타입 변경
                     if track_var.src.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
@@ -253,8 +360,14 @@ class PathObject():
                 if def_ref == None:
                     continue
 
-                # TODO: call 모든 인자 taint 리스트에 추가
+                taint.append(def_ref)
+                
+                # TODO: call 모든 인자 taint 리스트에 추가, a = sub(b) 형태
+                # TODO: return된 인자도 taint 리스트에 추가
 
+            # TODO: call 모든 인자 taint 리스트에 추가, sub(b) 형태
+            elif track_var.operation == MediumLevelILOperation.MLIL_CALL_SSA:
+                pass
                 # TODO: return된 인자도 taint 리스트에 추가
 
                 taint.append(def_ref)

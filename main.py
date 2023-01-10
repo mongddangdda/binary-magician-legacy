@@ -8,7 +8,7 @@ logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 if __name__ == '__main__':
 
-    binary = 'D:\\Projects\\binary-nomaj\\C\\testcases\\CWE134_Uncontrolled_Format_String\\s01\\CWE134_Uncontrolled_Format_String__char_connect_socket_printf_44.out'
+    binary = 'D:\\Projects\\binary-nomaj\\C\\testcases\\CWE134_Uncontrolled_Format_String\\s01\\CWE134_Uncontrolled_Format_String__char_connect_socket_printf_45.out'
     
     bv = binaryview.BinaryViewType.get_view_of_file(binary)
     
