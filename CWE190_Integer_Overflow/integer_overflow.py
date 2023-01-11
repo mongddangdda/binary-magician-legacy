@@ -65,7 +65,7 @@ def return_a_range(type: str):
 def check_type(left: MediumLevelILVarSsa, right : MediumLevelILVarSsa|MediumLevelILConst):
     pass
 
-def solution(bv: BinaryView, path: PathObject):
+def solution(bv: BinaryView, path: PathObject) -> list[Function]:
     result: list[Function] = []
 
     # 사용자 input이 sink에 도달하는지 체크하기

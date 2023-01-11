@@ -13,6 +13,14 @@ def main(args):
         from CWE190_Integer_Overflow.integer_overflow import make_sources_and_sinks, solution
     elif args.cwe == 'format_string':
         from CWE134_Uncontrolled_Format_String.format_string import make_sources_and_sinks, solution
+    elif args.cwe == 'command_injection':
+        from CWE78_OS_Command_Injection.command_injection import make_sources_and_sinks, solution
+    elif args.cwe == 'path_traversal':
+        from CWE23_Relative_Path_Traversal.path_traversal import make_sources_and_sinks, solution
+    elif args.cwe == 'buffer_overflow':
+        raise NotImplemented
+    
+
 
     if args.file_regex:
         file_list = get_matched_files_from_path(args.file)
@@ -39,7 +47,7 @@ def main(args):
             if PFOption.CHECK_USER_CONTROLLABLE:
                 if not check_user_controllable(path=path):
                     continue
-                
+
             vuln = solution(bv, path)
             if len(vuln) > 0:
                 print(f'Find!')
@@ -59,7 +67,7 @@ if __name__ == '__main__':
 
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cwe', required=True, help='integer_overflow or format_string')
+    parser.add_argument('--cwe', required=True, help='integer_overflow or format_string', choices=['integer_overflow', 'format_string', 'path_traversal', 'command_injection', 'buffer_overflow'])
     parser.add_argument('--file', required=True, help='file or directory name')
     parser.add_argument('--file_regex', required=False, help='if you want to filter file name with regex, use this argument')
     parser.add_argument('--options', required=False, nargs='+', help='POSSIBLE_VALUE_UPDATE|CHECK_FEASIBLE|CHECK_USER_CONTROLLABLE')
