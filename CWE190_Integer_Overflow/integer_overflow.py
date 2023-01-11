@@ -21,14 +21,40 @@ def is_in_ranges(type):
         
 def return_a_range(type: str):
     type_mapping = {
-        'char': (-128, 127),
-        'short': (-0x1000, 0xffff),
-        'int16_t': (-0x1000, 0xffff),
-        'int32_t': (-0x10000000, 0xffffffff),
-        'int64_t': (-0x1000000000000000, 0xffffffffffffffff)
+        'char': (True, -0x80, 0x7f),
+        'signed char': (True, -0x80, 0x7f),
+        'unsigned char': (False, 0, 0xff),
+        'short': (True, -0x8000, 0x7fff),
+        'signed short': (True, -0x8000, 0x7fff),
+        'unsigned short': (False, 0, 0xffff),
+        'short int': (True, -0x8000, 0x7fff),
+        'signed short int': (True, -0x8000, 0x7fff),
+        'unsigned short int': (False, 0, 0xffff),
+        'int': (True, -0x8000_0000, 0x7fff_ffff),
+        'signed int': (True, -0x8000_0000, 0x7fff_ffff),
+        'unsigned int': (False, 0, 0xffff_ffff),
+        'long int': (True, -0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
+        'signed long int': (True, -0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
+        'unsigned long int': (False, 0, 0xffff_ffff_ffff_ffff),
+        'long long': (True, -0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
+        'long long int': (True, -0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
+        'signed long long int': (True, 0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
+        'unsigned long long int': (False, 0, 0xffff_ffff_ffff_ffff),
+        'int8_t': (True, -0x80, 0x7f),
+        'uint8_t': (False, 0, 0xff),
+        'int16_t': (True, -0x8000, 0x7fff),
+        'uint16_t': (False, 0, 0xffff),
+        'int32_t': (True, -0x8000_0000, 0x7fff_ffff),
+        'uint32_t': (False, 0, 0xffff_ffff),
+        'int64_t': (True, -0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
+        'uint64_t': (False, 0, 0xffff_ffff_ffff_ffff)
     }
     if type in type_mapping:
-        return PossibleValueSet.signed_range_value([ValueRange(*type_mapping[type], 1)])
+        signed, min, max = type_mapping.get(type)
+        if signed:
+            return PossibleValueSet.signed_range_value([ValueRange(min, max, 1)])
+        else:
+            return PossibleValueSet.unsigned_range_value([ValueRange(min, max, 1)])
     raise
 
 def check_type(left: MediumLevelILVarSsa, right : MediumLevelILVarSsa|MediumLevelILConst):
