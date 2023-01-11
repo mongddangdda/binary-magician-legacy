@@ -1,4 +1,4 @@
-from binaryninja import Function, MediumLevelILCall, MediumLevelILVarSsa, MediumLevelILConst, MediumLevelILConstPtr, MediumLevelILOperation, SSAVariable, PossibleValueSet
+from binaryninja import Function, MediumLevelILCall, MediumLevelILVarSsa, MediumLevelILConst, MediumLevelILConstPtr, MediumLevelILOperation, SSAVariable, PossibleValueSet, MediumLevelILSetVarSsa
 from utils.path.parameter import Parameter
 import logging
 import pprint
@@ -17,7 +17,7 @@ class PEdge:
         self.start: Function = start
         self.end: Function = end
         self.address: int = address
-        self.instr: MediumLevelILCall
+        self.instr: MediumLevelILCall | MediumLevelILSetVarSsa
         self.parameters: dict[str, Parameter] = dict()
         '''
             {
