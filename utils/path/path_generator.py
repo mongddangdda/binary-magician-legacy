@@ -230,8 +230,8 @@ class PathObject():
                     continue
 
             elif track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
-            track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
-            # SET_VAR인 경우 
+                track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+                # SET_VAR인 경우 
                 if type(track_var.dest) == SSAVariable:
                     stack_vars.append(track_var.dest)
                     uses = track_var.ssa_form.function.get_ssa_var_uses(track_var.dest)
@@ -268,6 +268,15 @@ class PathObject():
         
         return (stack_vars, global_vars, heap_vars)
 
+
+    def get_ssavars_by_var(self, func: Function, var: Variable):
+        ssavars = []
+
+        for ssavar in func.mlil.ssa_vars:
+            if ssavar.var == var:
+                ssavars.append(ssavar)
+
+        return ssavars
 
 
 
@@ -330,7 +339,18 @@ class PathObject():
                     #SET_VAR의 src가 CONST_PTR인 경우
                     continue
                 elif track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
+                    # like rdx#1 = &var_12
+                    track_var.src.src: Variable
+                    _ssavars = self.get_ssavars_by_var(function, track_var.src.src)
+                    
+                    for _ssavar in _ssavars:                    
+                        stack_vars.append(_ssavar)
+                        def_ref = track_var.ssa_form.function.get_ssa_var_definition(_ssavar)
+                        if def_ref == None:
+                            continue    
+                        taint.append(def_ref)
                     continue
+                
                 elif track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
                     # TODO: 전역변수 처리
                     # global variable과 heap variable 구분하도록 리턴타입 변경
