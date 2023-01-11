@@ -5,7 +5,7 @@ from .path_generator import *
 from dataclasses import dataclass
 import builtins
 import logging
-
+from utils.path.options import PFOption
 
 '''
 TODO: list
@@ -59,7 +59,7 @@ class PathFinder():
     - [x] call path 만들기 (단순 function - function)
     - [ ] call 간 호출 위치로 더 자세한 path 만들기 ( (function, call site, argument) - (function, call site, argument) )
     '''
-    def __init__(self, bv: BinaryView, sources: list[PEdge], sinks: list[PEdge], option: PathGenOption=PathGenOption.DEFAULT) -> None:
+    def __init__(self, bv: BinaryView, sources: list[PEdge], sinks: list[PEdge], option: PFOption=PFOption.DEFAULT) -> None:
         self.bv = bv
         self.option = option
         self.graph = nx.MultiDiGraph() # entire graph with Function nodes
@@ -138,7 +138,7 @@ class PathFinder():
                 # source - sink 지점이 같은 함수 내에 존재하는 경우
                 if source.start.start == sink.start.start:
                     logging.debug(f'find path! {source.start}')
-                    path_obj = PathObject(bv=self.bv, type=PathType.SINGLE_FUNCTION, path=None, head=source.start, source=source, sink=sink, option=self.option)
+                    path_obj = PathObject(bv=self.bv, type=PathType.SINGLE_FUNCTION, path=[], head=source.start, source=source, sink=sink, option=self.option)
                     self.paths.append(path_obj)
 
                 # source -> sink 선형인 경우

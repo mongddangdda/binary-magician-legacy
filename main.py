@@ -2,53 +2,67 @@ from utils.utils import *
 from utils.path.path_finder import *
 from binaryninja import *
 from utils.runner import Runner
-from utils.angr_manager import AngrManager
 import logging
+from utils.path.options import PFOption
 
 logging.basicConfig(filename='', format='%(levelname)s:%(message)s', level=logging.INFO)
 
-# from CWE134_Uncontrolled_Format_String.format_string import source_targets, sink_targets, solution
-from CWE190_Integer_Overflow.integer_overflow import make_sources_and_sinks, solution
+def main(args):
 
+    if args.cwe == 'integer_overflow':
+        from CWE190_Integer_Overflow.integer_overflow import make_sources_and_sinks, solution
+    elif args.cwe == 'format_string':
+        from CWE134_Uncontrolled_Format_String.format_string import make_sources_and_sinks, solution
 
-def detect_suspicious(bv: BinaryView) -> list[Function]:
-    result = []
-    sources, sinks = make_sources_and_sinks(bv=bv)
+    if args.file_regex:
+        file_list = get_matched_files_from_path(args.file)
+    else:
+        file_list = get_all_files_from_path(args.file)
 
-    pf = PathFinder(bv=bv, sources=sources, sinks=sinks, option=PathGenOption.POSSIBLE_VALUE_UPDATE)
-    paths = pf.generate_path()
-    #pf.save_entire_graph('test_entire_graph.html')
-    for path in paths:
+    options = parse_options(args.options)
+   
+    def detect_suspicious(bv: BinaryView) -> list[Function]:
+        result = []
+        sources, sinks = make_sources_and_sinks(bv=bv)
 
-        # feasible check
-        # angr_manager = AngrManager(path=path)
-        # if angr_manager.check_feasible():
-        #     print(f'This Path are feasible!')
+        pf = PathFinder(bv=bv, sources=sources, sinks=sinks, option=options)
+        paths = pf.generate_path()
 
-        # check user input
-        if path.check_user_controllable():
-            print(f'The user input affects sink!')
-        
-        #path.show_pathobject() # for debug, you can view all element of node and edge
-        path.save_graph() # if name is None, filename is random
-        path.save_bndb_file_by_path()
-        vuln = solution(bv, path)
-        if len(vuln) > 0:
+        for path in paths:
             print(path.get_path())
-            result.extend(vuln)
-    return result
+            if PFOption.CHECK_FEASIBLE in options:
+                if not check_feasible(path=path):
+                    continue
+            
+            # path.show_pathobject() # for debug, you can view all element of node and edge
+
+            if PFOption.CHECK_USER_CONTROLLABLE:
+                if not check_user_controllable(path=path):
+                    continue
+                
+            vuln = solution(bv, path)
+            if len(vuln) > 0:
+                print(f'Find!')
+                result.extend(vuln)
+                #path.show_pathobject() # for debug, you can view all element of node and edge
+                #path.save_graph() # if name is None, filename is random
+                #path.save_bndb_file_by_path()
+
+        return result
+
+    runner = Runner(detect_suspicious, file_list)
+    runner.run()
+
 
 
 if __name__ == '__main__':
 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cwe', required=True, help='integer_overflow or format_string')
+    parser.add_argument('--file', required=True, help='file or directory name')
+    parser.add_argument('--file_regex', required=False, help='if you want to filter file name with regex, use this argument')
+    parser.add_argument('--options', required=False, nargs='+', help='POSSIBLE_VALUE_UPDATE|CHECK_FEASIBLE|CHECK_USER_CONTROLLABLE')
+    args = parser.parse_args()
 
-    #binary = 'D:\\Projects\\binary-nomaj\\C\\testcases\\CWE134_Uncontrolled_Format_String\\s01\\CWE134_Uncontrolled_Format_String__char_connect_socket_printf_45.out'
-    binary = 'D:\\Projects\\binary-nomaj\\C\\testcases\\CWE190_Integer_Overflow\\s02\\CWE190_Integer_Overflow__int_fgets_add_54.out'
-    #binary = 'D:\\Projects\\binary-nomaj\\C\\testcases\\CWE190_Integer_Overflow\\s02'
-    
-    #bv = binaryview.BinaryViewType.get_view_of_file(binary)
-    
-    # file_list = get_all_files_from_path(binary)
-    file_list = get_matched_files_from_path(path=binary, reg='^((?!rand|max).)*$')
-    runner = Runner(detect_suspicious, file_list)
-    runner.run()
+    main(args)

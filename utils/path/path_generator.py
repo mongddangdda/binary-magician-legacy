@@ -5,6 +5,8 @@ from pprint import pprint
 from binaryninja import *
 from enum import Enum, Flag, auto
 import uuid
+from utils.path.options import PFOption
+
 
 RED = '\033[1;31;48m'
 GREEN = '\033[1;32;40m'
@@ -16,19 +18,14 @@ class PathType(Enum):
     LINEAR_NODES = 2,
     TREE_NODES = 3
 
-class PathGenOption(Flag):
-    DEFAULT = auto()
-    POSSIBLE_VALUE_UPDATE = auto()
-    CHECK_FEASIBLE = auto()
-
 
 class PathObject():
-    def __init__(self, bv: BinaryView, type: PathType, path: None|list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PEdge, sink: PEdge, option: PathGenOption) -> None:
+    def __init__(self, bv: BinaryView, type: PathType, path: list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PEdge, sink: PEdge, option: PFOption) -> None:
         self.bv = bv
         self.type = type
         self.name = str(uuid.uuid4()) # FIXME: change name?
         self.option = option
-        self.path: None|list[tuple]|tuple[list[tuple]] = path # when single|linear|tree
+        self.path: list[tuple]|tuple[list[tuple]] = path # when single,linear|tree
         self.graph = nx.DiGraph() # with PNodes
         self.head_function: Function = head
         self.head: PNode
@@ -89,7 +86,7 @@ class PathObject():
 
             edge = PEdge(start=start, end=end, address=call_site_address)
 
-            if PathGenOption.POSSIBLE_VALUE_UPDATE in self.option:
+            if PFOption.POSSIBLE_VALUE_UPDATE in self.option:
                 edge.update_possible_value()
             
             self.edges[call_site_address] = edge
@@ -232,6 +229,10 @@ class PathObject():
             elif track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
                 track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
                 # SET_VAR인 경우 
+
+                if track_var.src.operation not in ( MediumLevelILOperation.MLIL_VAR_SSA, MediumLevelILOperation.MLIL_VAR_ALIASED, MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL ):
+                    continue
+
                 if type(track_var.dest) == SSAVariable:
                     stack_vars.append(track_var.dest)
                     uses = track_var.ssa_form.function.get_ssa_var_uses(track_var.dest)
@@ -298,6 +299,14 @@ class PathObject():
         visited = []
         taint = []
         
+        def taint_ssavar(ssavar: SSAVariable):
+            stack_vars.append(ssavar)
+            def_ref = function.mlil.ssa_form.get_ssa_var_definition(ssavar)
+            if def_ref:
+                taint.append(def_ref)
+            return 
+
+
         # for highlighting
         self.highlight_addr[function] = list()
 
@@ -336,23 +345,36 @@ class PathObject():
             track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
             # SET_VAR인 경우 
 
-                if track_var.src.operation not in (MediumLevelILOperation.MLIL_ADDRESS_OF, MediumLevelILOperation.MLIL_LOAD_SSA, MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL ):
+                if track_var.src.operation not in (MediumLevelILOperation.MLIL_VAR_SSA , MediumLevelILOperation.MLIL_VAR_ALIASED, MediumLevelILOperation.MLIL_ADDRESS_OF, MediumLevelILOperation.MLIL_LOAD_SSA, MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL ):
                     continue
 
                 if track_var.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
                     #SET_VAR의 src가 CONST_PTR인 경우
                     continue
+                
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_VAR_ALIASED:
+                    # ssavar: SSAVariable = track_var.src.src
+                    # stack_vars.append(ssavar)
+                    # def_ref = track_var.ssa_form.function.get_ssa_var_definition(ssavar)
+                    # if def_ref == None:
+                    #     continue
+
+                    # taint.append(def_ref)
+                    taint_ssavar(track_var.src.src)
+                    continue
+
                 elif track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
                     # like rdx#1 = &var_12
                     track_var.src.src: Variable
                     _ssavars = self.get_ssavars_by_var(function, track_var.src.src)
                     
                     for _ssavar in _ssavars:                    
-                        stack_vars.append(_ssavar)
-                        def_ref = track_var.ssa_form.function.get_ssa_var_definition(_ssavar)
-                        if def_ref == None:
-                            continue    
-                        taint.append(def_ref)
+                        # stack_vars.append(_ssavar)
+                        # def_ref = track_var.ssa_form.function.get_ssa_var_definition(_ssavar)
+                        # if def_ref == None:
+                        #     continue    
+                        # taint.append(def_ref)
+                        taint_ssavar(_ssavar)
                     continue
                 
                 elif track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
@@ -362,29 +384,36 @@ class PathObject():
                         global_vars.append(track_var.src.src)
                     continue
                 # src trace
-                var = track_var.src.ssa_form
+                #var = track_var.src.ssa_form
 
-                if var.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
                     #LOAD인 경우 해당 src를 참조
-                    var = var.src
-                if var.operation == MediumLevelILOperation.MLIL_ADD or \
-                var.operation == MediumLevelILOperation.MLIL_SUB or \
-                var.operation == MediumLevelILOperation.MLIL_MUL or \
-                var.operation == MediumLevelILOperation.MLIL_DIVS:
-                    #src가 operation인 경우, VAR 참조
-                    if var.left.operation == MediumLevelILOperation.MLIL_VAR_SSA:
-                        var = var.left
-                    else:
-                        var = var.right
-                while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
-                    var = var.src
-                
-                stack_vars.append(var)
-                def_ref = track_var.ssa_form.function.get_ssa_var_definition(var)
-                if def_ref == None:
+                    if track_var.src.src == MediumLevelILOperation.MLIL_VAR_SSA:
+                        taint_ssavar(track_var.src.src)
+                        continue
+
+                elif track_var.src.operation in ( MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL):
+                    if track_var.src.left.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                        taint_ssavar(track_var.src.left.src)
+                    if track_var.src.right.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                        taint_ssavar(track_var.src.right.src)
                     continue
 
-                taint.append(def_ref)
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                    taint_ssavar(track_var.src.src)
+                    continue
+
+                # while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
+                #     var = var.src
+                
+                # raise NotImplemented
+                print('zzzzzzzz')
+                # stack_vars.append(track_var.src)
+                # def_ref = track_var.ssa_form.function.get_ssa_var_definition(var)
+                # if def_ref == None:
+                #     continue
+
+                # taint.append(def_ref)
                 
                 # TODO: call 모든 인자 taint 리스트에 추가, a = sub(b) 형태
                 # TODO: return된 인자도 taint 리스트에 추가
@@ -394,7 +423,7 @@ class PathObject():
                 pass
                 # TODO: return된 인자도 taint 리스트에 추가
 
-                taint.append(def_ref)
+                #taint.append(def_ref)
 
         return (stack_vars, global_vars, heap_vars)
 
