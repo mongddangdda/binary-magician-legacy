@@ -23,11 +23,17 @@ if __name__ == '__main__':
     paths = pf.generate_path()
     #pf.save_entire_graph('test_entire_graph.html')
     for path in paths:
+
+        # feasible check
+        angr_manager = AngrManager(path=path)
+        if angr_manager.check_feasible():
+            print(f'This Path are feasible!')
+
+        # check user input
+        if path.check_user_controllable():
+            print(f'The user input affects sink!')
+        
         path.show_pathobject() # for debug, you can view all element of node and edge
         #path.save_graph() # if name is None, filename is random
         #path.save_bndb_file_by_path()
-
-        # angr_manager = AngrManager(path=path)
-        # if angr_manager.check_feasible():
-        #     print(f'This Path are feasible!')
         solution(bv, path)
