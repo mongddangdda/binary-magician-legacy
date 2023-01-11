@@ -67,7 +67,7 @@ class Runner:
             if binary is None:
                 continue
             binary.run(self.solution)
-            print(binary.answer_path)
+            #print(binary.answer_path)
             self.evaluation(file.name, binary.result, binary.answer)
         self.show_result()
 

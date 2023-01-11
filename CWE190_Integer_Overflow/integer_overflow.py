@@ -4,6 +4,11 @@ from z3 import *
 
 source_targets = {
     '__isoc99_fscanf': [2], # 000011b0  int32_t __isoc99_fscanf(FILE* stream, char const* format, ...)
+    'recv': [1],
+    'fgets': [0],
+    'gets': [0], 
+    'scanf': [1],
+    'read': [1],
     'recv': [1]
 }
 
@@ -109,7 +114,7 @@ def solution(bv: BinaryView, path: PathObject):
         # pv_c: PossibleValueSet = PossibleValueSet.constant(right.constant)
         pv_c: PossibleValueSet = sink.parameters['operand2'].possible_value
         # c = right.constant
-        c = pv_c.constant
+        c = pv_c.value
 
 
     # TODO: handle this types

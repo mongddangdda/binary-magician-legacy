@@ -335,6 +335,10 @@ class PathObject():
             if track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
             track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
             # SET_VAR인 경우 
+
+                if track_var.src.operation not in (MediumLevelILOperation.MLIL_ADDRESS_OF, MediumLevelILOperation.MLIL_LOAD_SSA, MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL ):
+                    continue
+
                 if track_var.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
                     #SET_VAR의 src가 CONST_PTR인 경우
                     continue
@@ -468,6 +472,19 @@ class PathObject():
                 controllable = True
 
         return controllable
+
+    def get_path(self) -> str:
+        result = f'Full Path : '
+        if self.type == PathType.SINGLE_FUNCTION:
+            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
+        elif self.type == PathType.LINEAR_NODES:
+            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
+            for _, end, _ in self.path:
+                result += f' -> ' + end.name if end.name is not None else f'{end.start:#x}'
+        elif self.type == PathType.TREE_NODES:
+            result += 'Not Implemented yet!'
+        result += '\n'
+        return result
 
     def show_pathobject(self):
         result = f'''\nName: {self.name}.html\nThis function's type is {self.type} with {self.option} option
