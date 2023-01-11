@@ -451,6 +451,24 @@ class PathObject():
 
     #     return result
 
+    def check_user_controllable(self) -> bool:
+
+        controllable = False
+
+        source_node: PNode = self.nodes.get(self.source.start)
+        for tainted_var in source_node.tainted_vars_from_sink:
+            if tainted_var in source_node.tainted_vars_from_source:
+                logging.info(f'user control affects {tainted_var}, found at source node')
+                controllable = True
+
+        sink_node: PNode = self.nodes.get(self.sink.start)
+        for tainted_var in sink_node.tainted_vars_from_sink:
+            if tainted_var in sink_node.tainted_vars_from_source:
+                logging.info(f'user control affects {tainted_var}, found at sink node')
+                controllable = True
+
+        return controllable
+
     def show_pathobject(self):
         result = f'''\nName: {self.name}.html\nThis function's type is {self.type} with {self.option} option
         '''
