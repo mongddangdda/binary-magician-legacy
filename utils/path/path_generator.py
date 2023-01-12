@@ -5,6 +5,8 @@ from pprint import pprint
 from binaryninja import *
 from enum import Enum, Flag, auto
 import uuid
+from utils.path.options import PFOption
+
 
 RED = '\033[1;31;48m'
 GREEN = '\033[1;32;40m'
@@ -16,19 +18,14 @@ class PathType(Enum):
     LINEAR_NODES = 2,
     TREE_NODES = 3
 
-class PathGenOption(Flag):
-    DEFAULT = auto()
-    POSSIBLE_VALUE_UPDATE = auto()
-    CHECK_FEASIBLE = auto()
-
 
 class PathObject():
-    def __init__(self, bv: BinaryView, type: PathType, path: None|list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PEdge, sink: PEdge, option: PathGenOption) -> None:
+    def __init__(self, bv: BinaryView, type: PathType, path: list[tuple]|tuple[list[tuple], list[tuple]], head: Function, source: PEdge, sink: PEdge, option: PFOption) -> None:
         self.bv = bv
         self.type = type
         self.name = str(uuid.uuid4()) # FIXME: change name?
         self.option = option
-        self.path: None|list[tuple]|tuple[list[tuple]] = path # when single|linear|tree
+        self.path: list[tuple]|tuple[list[tuple]] = path # when single,linear|tree
         self.graph = nx.DiGraph() # with PNodes
         self.head_function: Function = head
         self.head: PNode
@@ -41,7 +38,7 @@ class PathObject():
         self.highlight_addr: dict[Function, list[int]] = dict()
 
         if self.type == PathType.SINGLE_FUNCTION:
-            self.generate_single_node()
+            self.generate_single_node(self.source.start)
         elif self.type == PathType.LINEAR_NODES:
             self.generate_linear_nodes(path=self.path)
         elif self.type == PathType.TREE_NODES: 
@@ -62,21 +59,132 @@ class PathObject():
             return True
         return False
 
-    def generate_single_node(self):
+    def generate_single_node(self, function: Function):
         logging.debug(f'source node and sink are same at {self.source.start}')
 
-        node = PNode(self.source.start)
-        self.nodes[self.source.start] = node
-        self.head = node
+        if self.nodes.get(function) is None:
+            node = PNode(function)
+            self.nodes[function] = node
+            self.head = node
 
         # fill tainted variable to object by backward tainting
-        self.backward_tainting(type='sink')
-        self.backward_tainting(type='source')
-
-        self.graph.add_node(node)
+        if self.type == PathType.SINGLE_FUNCTION:
+            self.backward_tainting(type='sink')
+            self.backward_tainting(type='source')
+            self.graph.add_node(node)
+        elif self.type == PathType.TREE_NODES:
+            self.backward_tainting(type='sink')
 
         logging.debug(f'Creating a path graph is done')
         
+
+    def generate_tree_nodes(self, source_path:list[tuple], sink_path:list[tuple]):      
+        logging.debug(f'Head: {self.head_function.name}, Source: {self.source.start.name}, Sink: {self.sink.start.name}')
+
+        self.generate_tree_nodes_2(path=source_path)
+        if len(sink_path) < 1:
+            self.generate_single_node(function=self.head)
+        else:
+            self.generate_tree_nodes_2(path=sink_path)
+        
+    def generate_tree_nodes_2(self, path: list[tuple]):
+        for start, end, call_site_address in path:
+            logging.debug(f'start: {start} -> end: {end} at call_site: 0x{call_site_address:x}')
+            start: Function
+            end: Function
+            call_site_address: int
+
+            edge = PEdge(start=start, end=end, address=call_site_address)
+
+            if PFOption.POSSIBLE_VALUE_UPDATE in self.option:
+                edge.update_possible_value()
+            
+            self.edges[call_site_address] = edge
+
+            # node initial set up
+            if self.nodes.get(start) is None:
+                _node = PNode(start)
+                self.nodes[start] = _node
+            if self.nodes.get(end) is None:
+                _node = PNode(end)
+                self.nodes[end] = _node
+
+            start_node: PNode = self.nodes.get(edge.start)
+            end_node: PNode = self.nodes.get(edge.end)
+
+            start_node.next = end_node
+            start_node.next_at = edge
+            end_node.prev = start_node
+            end_node.prev_at = edge
+
+
+
+        def local_backward_tainting(type: str, path: list[tuple]=[]):
+
+            if type == 'sink':
+                backward_edges = [self.sink]
+            elif type == 'source':
+                backward_edges = [self.source]
+
+            for _, _, call_site in path[::-1]:
+                backward_edges.append(self.edges.get(call_site))
+
+            tmp = []
+            for edge in backward_edges[:-1]:
+                logging.debug(f'backward {edge}')
+                if edge.taint_args is None:
+                    # when this edge is not source or sink.
+                    edge.taint_args = tmp
+                
+                ssavar = edge.get_ssavars_to_taint()
+                
+                if type == 'sink':
+                    stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                    self.nodes[edge.start].tainted_vars_from_sink = stack_vars
+                    self.nodes[edge.start].global_vars.extend(global_vars)
+                    self.nodes[edge.start].heap_vars.extend(heap_vars)
+                elif type == 'source':
+                    stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+
+                    self.nodes[edge.start].tainted_vars_from_source = stack_vars
+                    self.nodes[edge.start].global_vars.extend(global_vars)
+                    self.nodes[edge.start].heap_vars.extend(heap_vars)
+
+                tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in stack_vars if arg.var.name.startswith('arg')]
+            
+            edge = backward_edges[-1]
+
+            if edge.taint_args is None:
+                # when this edge is not source or sink.
+                edge.taint_args = tmp
+
+            ssavar = edge.get_ssavars_to_taint()
+            
+            if type == 'sink':
+                stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                self.nodes[edge.start].tainted_vars_from_sink = stack_vars
+                self.nodes[edge.start].global_vars.extend(global_vars)
+                self.nodes[edge.start].heap_vars.extend(heap_vars)
+            elif type == 'source':
+                stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                stack_vars2, global_vars2, heap_vars2 = self.get_related_vars_in_function_forward(function=edge.start, vars=stack_vars)
+
+                self.nodes[edge.start].tainted_vars_from_source = stack_vars + stack_vars2
+                self.nodes[edge.start].global_vars.extend(global_vars + global_vars2)
+                self.nodes[edge.start].heap_vars.extend(heap_vars + heap_vars2)
+
+
+        # fill tainted variable to object by backward tainting
+        local_backward_tainting(type='source', path=path)
+        local_backward_tainting(type='sink', path=path)
+
+        # make head node
+        head_node = self.nodes.get(self.head_function)
+        self.head = head_node
+
+        # make graph
+        self.make_graph()
+
 
     def generate_linear_nodes(self, path: list[tuple]):
         logging.debug(f'The head node is a source function {self.head_function.name}')
@@ -89,7 +197,7 @@ class PathObject():
 
             edge = PEdge(start=start, end=end, address=call_site_address)
 
-            if PathGenOption.POSSIBLE_VALUE_UPDATE in self.option:
+            if PFOption.POSSIBLE_VALUE_UPDATE in self.option:
                 edge.update_possible_value()
             
             self.edges[call_site_address] = edge
@@ -167,11 +275,6 @@ class PathObject():
 
             tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in stack_vars if arg.var.name.startswith('arg')]
 
-    def generate_tree_nodes(self, source_path:list[tuple], sink_path:list[tuple]):
-        # TODO:
-        logging.debug(f'Head: {self.head_function.name}, Source: {self.source.start.name}, Sink: {self.sink.start.name}')
-        
-
     def get_related_vars_in_function_forward(self, function: Function, vars: list[SSAVariable]) -> tuple[list[SSAVariable], list[MediumLevelILConstPtr], list[SSAVariable]]:
         '''
         하나의 함수 내에서 주어진 SSAVariable와 관련된 모든 변수를 리턴.
@@ -232,6 +335,10 @@ class PathObject():
             elif track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
                 track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
                 # SET_VAR인 경우 
+
+                if track_var.src.operation not in ( MediumLevelILOperation.MLIL_VAR_SSA, MediumLevelILOperation.MLIL_VAR_ALIASED, MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL ):
+                    continue
+
                 if type(track_var.dest) == SSAVariable:
                     stack_vars.append(track_var.dest)
                     uses = track_var.ssa_form.function.get_ssa_var_uses(track_var.dest)
@@ -298,6 +405,14 @@ class PathObject():
         visited = []
         taint = []
         
+        def taint_ssavar(ssavar: SSAVariable):
+            stack_vars.append(ssavar)
+            def_ref = function.mlil.ssa_form.get_ssa_var_definition(ssavar)
+            if def_ref:
+                taint.append(def_ref)
+            return 
+
+
         # for highlighting
         self.highlight_addr[function] = list()
 
@@ -335,20 +450,37 @@ class PathObject():
             if track_var.operation == MediumLevelILOperation.MLIL_SET_VAR or \
             track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
             # SET_VAR인 경우 
+
+                if track_var.src.operation not in (MediumLevelILOperation.MLIL_VAR_SSA , MediumLevelILOperation.MLIL_VAR_ALIASED, MediumLevelILOperation.MLIL_ADDRESS_OF, MediumLevelILOperation.MLIL_LOAD_SSA, MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL ):
+                    continue
+
                 if track_var.src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
                     #SET_VAR의 src가 CONST_PTR인 경우
                     continue
+                
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_VAR_ALIASED:
+                    # ssavar: SSAVariable = track_var.src.src
+                    # stack_vars.append(ssavar)
+                    # def_ref = track_var.ssa_form.function.get_ssa_var_definition(ssavar)
+                    # if def_ref == None:
+                    #     continue
+
+                    # taint.append(def_ref)
+                    taint_ssavar(track_var.src.src)
+                    continue
+
                 elif track_var.src.operation == MediumLevelILOperation.MLIL_ADDRESS_OF:
                     # like rdx#1 = &var_12
                     track_var.src.src: Variable
                     _ssavars = self.get_ssavars_by_var(function, track_var.src.src)
                     
                     for _ssavar in _ssavars:                    
-                        stack_vars.append(_ssavar)
-                        def_ref = track_var.ssa_form.function.get_ssa_var_definition(_ssavar)
-                        if def_ref == None:
-                            continue    
-                        taint.append(def_ref)
+                        # stack_vars.append(_ssavar)
+                        # def_ref = track_var.ssa_form.function.get_ssa_var_definition(_ssavar)
+                        # if def_ref == None:
+                        #     continue    
+                        # taint.append(def_ref)
+                        taint_ssavar(_ssavar)
                     continue
                 
                 elif track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
@@ -358,29 +490,36 @@ class PathObject():
                         global_vars.append(track_var.src.src)
                     continue
                 # src trace
-                var = track_var.src.ssa_form
+                #var = track_var.src.ssa_form
 
-                if var.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_LOAD_SSA:
                     #LOAD인 경우 해당 src를 참조
-                    var = var.src
-                if var.operation == MediumLevelILOperation.MLIL_ADD or \
-                var.operation == MediumLevelILOperation.MLIL_SUB or \
-                var.operation == MediumLevelILOperation.MLIL_MUL or \
-                var.operation == MediumLevelILOperation.MLIL_DIVS:
-                    #src가 operation인 경우, VAR 참조
-                    if var.left.operation == MediumLevelILOperation.MLIL_VAR_SSA:
-                        var = var.left
-                    else:
-                        var = var.right
-                while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
-                    var = var.src
-                
-                stack_vars.append(var)
-                def_ref = track_var.ssa_form.function.get_ssa_var_definition(var)
-                if def_ref == None:
+                    if track_var.src.src == MediumLevelILOperation.MLIL_VAR_SSA:
+                        taint_ssavar(track_var.src.src)
+                        continue
+
+                elif track_var.src.operation in ( MediumLevelILOperation.MLIL_ADD, MediumLevelILOperation.MLIL_SUB, MediumLevelILOperation.MLIL_MUL):
+                    if track_var.src.left.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                        taint_ssavar(track_var.src.left.src)
+                    if track_var.src.right.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                        taint_ssavar(track_var.src.right.src)
                     continue
 
-                taint.append(def_ref)
+                elif track_var.src.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                    taint_ssavar(track_var.src.src)
+                    continue
+
+                # while type(var) != binaryninja.mediumlevelil.SSAVariable: # MediumLevelILOperation.MLIL_VAR_ALIASED
+                #     var = var.src
+                
+                # raise NotImplemented
+                print('zzzzzzzz')
+                # stack_vars.append(track_var.src)
+                # def_ref = track_var.ssa_form.function.get_ssa_var_definition(var)
+                # if def_ref == None:
+                #     continue
+
+                # taint.append(def_ref)
                 
                 # TODO: call 모든 인자 taint 리스트에 추가, a = sub(b) 형태
                 # TODO: return된 인자도 taint 리스트에 추가
@@ -390,8 +529,15 @@ class PathObject():
                 pass
                 # TODO: return된 인자도 taint 리스트에 추가
 
-                taint.append(def_ref)
-
+                #taint.append(def_ref)
+            elif track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_ALIASED:
+                if type(track_var.next) == SSAVariable:
+                    taint_ssavar(track_var.next)
+                if type(track_var.prev) == SSAVariable:
+                    taint_ssavar(track_var.prev)
+                if track_var.src.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                    taint_ssavar(track_var.src.src)
+                continue
         return (stack_vars, global_vars, heap_vars)
 
 
@@ -469,6 +615,23 @@ class PathObject():
 
         return controllable
 
+    def get_path(self) -> str:
+        result = f''
+        if self.type == PathType.SINGLE_FUNCTION:
+            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
+        elif self.type == PathType.LINEAR_NODES:
+            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
+            for _, end, _ in self.path:
+                result += f' -> ' + end.name if end.name is not None else f'{end.start:#x}'
+        elif self.type == PathType.TREE_NODES:
+            result += self.source.start.name if self.source.start.name is not None else f'{self.source.start.start:#x}'
+            for start, _, _ in self.path[0][::-1]:
+                result += f' -> ' + start.name if start.name is not None else f'{start.start:#x}'
+            for _, end, _ in self.path[1]:
+                result += f' -> ' + end.name if end.name is not None else f'{end.start:#x}'
+        result += '\n'
+        return result
+
     def show_pathobject(self):
         result = f'''\nName: {self.name}.html\nThis function's type is {self.type} with {self.option} option
         '''
@@ -493,11 +656,19 @@ class PathObject():
             result += f'{YELLOW}{self.sink}{END}'
 
         elif self.type == PathType.TREE_NODES:
-            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
-            result += f'{END}\n'
-            result += f'SORRY NOT IMPLEMENTED YET!'
-            pass
+            result += self.get_path() + f'{END}\n'
+            result += f'head: ' + self.head_function.name if self.head_function.name is not None else f'{self.head_function.start:#x}'
+            result += f'{YELLOW}{self.source}{END}\n'
+            result += f'{GREEN}{self.nodes.get(self.source.start)}{END}\n'
 
+            for start, _, call_site in self.path[0][::-1]:
+                result += f'{YELLOW}{self.edges.get(call_site)}{END}\n'
+                result += f'{GREEN}{self.nodes.get(start)}{END}\n'
+            for _, end, call_site in self.path[1]:
+                result += f'{YELLOW}{self.edges.get(call_site)}{END}\n'
+                result += f'{GREEN}{self.nodes.get(end)}{END}\n'
+            result += f'{YELLOW}{self.sink}{END}\n'
+            
         result += '\n'
         print(result)
         

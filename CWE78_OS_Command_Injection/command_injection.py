@@ -1,5 +1,6 @@
 from binaryninja import *
-from utils.path.path_generator import PathObject, PEdge
+from utils.path.edge import PEdge
+from utils.path.path_generator import PathObject
 
 source_targets = {
     '__isoc99_fscanf': [2], # 000011b0  int32_t __isoc99_fscanf(FILE* stream, char const* format, ...)
@@ -8,19 +9,16 @@ source_targets = {
     'gets': [0], 
     'scanf': [1],
     'read': [1],
-    'recv': [1]
+    'recv': [1],
+    'fgetws' : [0],
+    'strncat' : [0]
 }
 
 sink_targets = {
-    'puts': [0],
-    'fprintf': [1],
-    'printf': [0],
-    'sprintf': [1],
-    'snprintf': [2],
-    'vprintf': [0],
-    'vfprintf': [1],
-    'vsprintf': [1],
-    'vnsprintf': [2]
+    'execl': [3],
+    'execlp': [3],
+    'popen': [0],
+    'system': [0]
 }
 
 def make_sources_and_sinks(bv:BinaryView):

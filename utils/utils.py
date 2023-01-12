@@ -1,9 +1,14 @@
 import re
 from pathlib import Path
+from utils.angr_manager import AngrManager
 from utils.path.node import *
 from binaryninja.binaryview import BinaryViewType
 from binaryninja import *
 import networkx as nx
+
+from utils.path.options import PFOption
+from utils.path.path_generator import PathObject
+
 
 def get_all_files_from_path(path: str, depth_level: int = None, file_type: str = '.out') -> list[Path]:
 
@@ -311,3 +316,19 @@ def make_arithmetic_targets(bv: BinaryView) -> list[PEdge]:
                     result.append(PEdge(start=func, address=inst.address, taint_args=[0,1,2]))
 
     return result
+
+def parse_options(options_list: Optional[str] = None):
+    options = PFOption.DEFAULT
+    if options_list:
+        options_list = options_list[0].split(',')
+        for option in options_list:
+            options |= PFOption[option]
+
+    return options
+
+def check_feasible(path: PathObject) -> bool:
+    angr_manager = AngrManager(path=path)
+    return angr_manager.check_feasible()
+
+def check_user_controllable(path: PathObject) -> bool:
+    return path.check_user_controllable()

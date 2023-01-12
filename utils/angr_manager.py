@@ -1,8 +1,8 @@
 import angr
+from typing import TYPE_CHECKING
 from utils.path.path_generator import PathObject
 from utils.path.node import PEdge
 import logging
-from binaryninja import Function
 
 class AngrManager():
     def __init__(self, path: PathObject) -> None:
@@ -26,6 +26,7 @@ class AngrManager():
         return result
 
     def check_feasible(self) -> bool:
+
         entry_state = self.project.factory.entry_state()
         simulation = self.project.factory.simgr(entry_state)
 

@@ -5,7 +5,7 @@ from .path_generator import *
 from dataclasses import dataclass
 import builtins
 import logging
-
+from utils.path.options import PFOption
 
 '''
 TODO: list
@@ -59,7 +59,7 @@ class PathFinder():
     - [x] call path 만들기 (단순 function - function)
     - [ ] call 간 호출 위치로 더 자세한 path 만들기 ( (function, call site, argument) - (function, call site, argument) )
     '''
-    def __init__(self, bv: BinaryView, sources: list[PEdge], sinks: list[PEdge], option: PathGenOption=PathGenOption.DEFAULT) -> None:
+    def __init__(self, bv: BinaryView, sources: list[PEdge], sinks: list[PEdge], option: PFOption=PFOption.DEFAULT) -> None:
         self.bv = bv
         self.option = option
         self.graph = nx.MultiDiGraph() # entire graph with Function nodes
@@ -125,6 +125,57 @@ class PathFinder():
         for func in self.bv.functions:
             func.clear_all_user_var_values()
 
+    def find_heads(self, source: PEdge) -> list[Function]:
+        
+        heads = set()
+        paths = []
+        from utils.path.taint import get_related_var_stack
+
+        func = source.start
+        ssavars = source.get_ssavars_to_taint()
+
+        paths.append( [(func, ssavars)] )
+
+        while len(paths) > 0:
+            path: list[tuple] = paths.pop()
+            func, ssavars = path[-1]
+            new_ssavars = get_related_var_stack(function=func, ssavars=ssavars)
+
+            args = [(arg, arg.var.name.split('arg')[1]) for arg in new_ssavars if arg.var.name.startswith('arg')]
+            if len(args) < 1: # argument로 초기화된 변수가 없을 때는 패스
+                heads.add(func)
+                continue
+
+            arg_nums = [arg_num for _, arg_num in args]
+            xrefs = self.bv.get_code_refs(func.start)
+
+            for ref in xrefs:
+                ref: ReferenceSource
+
+                mlil = ref.function.get_llil_at(ref.address).mlil
+
+                if mlil is None:
+                    continue
+
+                if mlil.operation != MediumLevelILOperation.MLIL_CALL or\
+                    type(mlil.dest) != MediumLevelILConstPtr:
+                    continue
+                
+                caller_function = self.bv.get_function_at(mlil.dest.constant)
+                if caller_function is None:
+                    continue
+
+                _ssavars = []
+                for arg_num in arg_nums:
+                    _taint_param = self.param_idx_to_ssavar(ref.function, ref.address, int(arg_num))
+                    #_taint_param = caller.function.get_llil_at(caller.address).mlil.ssa_form.params[int(arg_num)-1]
+                    if type(_taint_param) == MediumLevelILVarSsa:
+                        _ssavars.append(_taint_param.src)
+
+                paths.append(path.copy() + [(ref.function, _ssavars)])
+
+        return list(heads)
+
     def generate_path(self):
 
         # TODO: itertool 사용하기
@@ -138,7 +189,7 @@ class PathFinder():
                 # source - sink 지점이 같은 함수 내에 존재하는 경우
                 if source.start.start == sink.start.start:
                     logging.debug(f'find path! {source.start}')
-                    path_obj = PathObject(bv=self.bv, type=PathType.SINGLE_FUNCTION, path=None, head=source.start, source=source, sink=sink, option=self.option)
+                    path_obj = PathObject(bv=self.bv, type=PathType.SINGLE_FUNCTION, path=[], head=source.start, source=source, sink=sink, option=self.option)
                     self.paths.append(path_obj)
 
                 # source -> sink 선형인 경우
@@ -149,8 +200,27 @@ class PathFinder():
                         path_obj = PathObject(bv=self.bv, type=PathType.LINEAR_NODES, path=path, head=source.start, source=source, sink=sink, option=self.option)
                         self.paths.append(path_obj)
 
-                # TODO: tree node 형태인 경우
-                
+                # tree node 형태인 경우
+                else:
+                    heads = self.find_heads(source=source)
+                    for head in heads:
+                        if head.start == sink.start.start:
+                            # head 내에 sink가 연결된 경우
+                            paths_to_source = nx.all_simple_edge_paths(self.graph, head, source.start)
+                            for path_to_source in paths_to_source:
+                                path = (path_to_source, [])
+                                path_obj = PathObject(bv=self.bv, type=PathType.TREE_NODES, path=path, head=head, source=source, sink=sink, option=self.option)
+                                self.paths.append(path_obj)
+                        elif nx.has_path(self.graph, head, sink.start):
+                            logging.debug(f'find path! {head} -> {sink.start}')    
+                            paths_to_source = nx.all_simple_edge_paths(self.graph, head, source.start)
+                            paths_to_sink = nx.all_simple_edge_paths(self.graph, head, sink.start)
+                            for path_to_source in paths_to_source:
+                                for path_to_sink in paths_to_sink:
+                                    path = (path_to_source, path_to_sink)
+                                    path_obj = PathObject(bv=self.bv, type=PathType.TREE_NODES, path=path, head=head, source=source, sink=sink, option=self.option)
+                                    self.paths.append(path_obj)
+
         return self.paths
                 
 

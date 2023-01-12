@@ -1,0 +1,18 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current Project",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}\\main.py",
+            "args": ["--cwe", "integer_overflow", "--file","D:\\Projects\\binary-nomaj\\C\\testcases\\CWE190_Integer_Overflow\\s02\\CWE190_Integer_Overflow__int64_t_fscanf_square_42.out",
+                    "--file_regex", "^((?!rand|max).)*$", "--option", "POSSIBLE_VALUE_UPDATE,CHECK_USER_CONTROLLABLE"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
