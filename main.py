@@ -70,7 +70,7 @@ if __name__ == '__main__':
     parser.add_argument('--cwe', required=True, help='integer_overflow or format_string', choices=['integer_overflow', 'format_string', 'path_traversal', 'command_injection', 'buffer_overflow'])
     parser.add_argument('--file', required=True, help='file or directory name')
     parser.add_argument('--file_regex', required=False, help='if you want to filter file name with regex, use this argument')
-    parser.add_argument('--options', required=False, nargs='+', help='POSSIBLE_VALUE_UPDATE|CHECK_FEASIBLE|CHECK_USER_CONTROLLABLE')
+    parser.add_argument('--options', required=False, nargs='+', help='POSSIBLE_VALUE_UPDATE,CHECK_FEASIBLE,CHECK_USER_CONTROLLABLE')
     args = parser.parse_args()
 
     main(args)
