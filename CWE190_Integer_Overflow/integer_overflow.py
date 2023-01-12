@@ -52,7 +52,11 @@ def return_a_range(type: str):
         'int32_t': (True, -0x8000_0000, 0x7fff_ffff),
         'uint32_t': (False, 0, 0xffff_ffff),
         'int64_t': (True, -0x8000_0000_0000_0000, 0x7fff_ffff_ffff_ffff),
-        'uint64_t': (False, 0, 0xffff_ffff_ffff_ffff)
+        'uint64_t': (False, 0, 0xffff_ffff_ffff_ffff),
+        'void*': (False, 0, 0xffff_ffff_ffff_ffff),
+        'char*': (False, 0, 0xffff_ffff_ffff_ffff),
+        'short*': (False, 0, 0xffff_ffff_ffff_ffff),
+        'int*': (False, 0, 0xffff_ffff_ffff_ffff),
     }
     if type in type_mapping:
         signed, min, max = type_mapping.get(type)
