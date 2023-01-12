@@ -38,7 +38,7 @@ class PathObject():
         self.highlight_addr: dict[Function, list[int]] = dict()
 
         if self.type == PathType.SINGLE_FUNCTION:
-            self.generate_single_node()
+            self.generate_single_node(self.source.start)
         elif self.type == PathType.LINEAR_NODES:
             self.generate_linear_nodes(path=self.path)
         elif self.type == PathType.TREE_NODES: 
@@ -59,21 +59,132 @@ class PathObject():
             return True
         return False
 
-    def generate_single_node(self):
+    def generate_single_node(self, function: Function):
         logging.debug(f'source node and sink are same at {self.source.start}')
 
-        node = PNode(self.source.start)
-        self.nodes[self.source.start] = node
-        self.head = node
+        if self.nodes.get(function) is None:
+            node = PNode(function)
+            self.nodes[function] = node
+            self.head = node
 
         # fill tainted variable to object by backward tainting
-        self.backward_tainting(type='sink')
-        self.backward_tainting(type='source')
-
-        self.graph.add_node(node)
+        if self.type == PathType.SINGLE_FUNCTION:
+            self.backward_tainting(type='sink')
+            self.backward_tainting(type='source')
+            self.graph.add_node(node)
+        elif self.type == PathType.TREE_NODES:
+            self.backward_tainting(type='sink')
 
         logging.debug(f'Creating a path graph is done')
         
+
+    def generate_tree_nodes(self, source_path:list[tuple], sink_path:list[tuple]):      
+        logging.debug(f'Head: {self.head_function.name}, Source: {self.source.start.name}, Sink: {self.sink.start.name}')
+
+        self.generate_tree_nodes_2(path=source_path)
+        if len(sink_path) < 1:
+            self.generate_single_node(function=self.head)
+        else:
+            self.generate_tree_nodes_2(path=sink_path)
+        
+    def generate_tree_nodes_2(self, path: list[tuple]):
+        for start, end, call_site_address in path:
+            logging.debug(f'start: {start} -> end: {end} at call_site: 0x{call_site_address:x}')
+            start: Function
+            end: Function
+            call_site_address: int
+
+            edge = PEdge(start=start, end=end, address=call_site_address)
+
+            if PFOption.POSSIBLE_VALUE_UPDATE in self.option:
+                edge.update_possible_value()
+            
+            self.edges[call_site_address] = edge
+
+            # node initial set up
+            if self.nodes.get(start) is None:
+                _node = PNode(start)
+                self.nodes[start] = _node
+            if self.nodes.get(end) is None:
+                _node = PNode(end)
+                self.nodes[end] = _node
+
+            start_node: PNode = self.nodes.get(edge.start)
+            end_node: PNode = self.nodes.get(edge.end)
+
+            start_node.next = end_node
+            start_node.next_at = edge
+            end_node.prev = start_node
+            end_node.prev_at = edge
+
+
+
+        def local_backward_tainting(type: str, path: list[tuple]=[]):
+
+            if type == 'sink':
+                backward_edges = [self.sink]
+            elif type == 'source':
+                backward_edges = [self.source]
+
+            for _, _, call_site in path[::-1]:
+                backward_edges.append(self.edges.get(call_site))
+
+            tmp = []
+            for edge in backward_edges[:-1]:
+                logging.debug(f'backward {edge}')
+                if edge.taint_args is None:
+                    # when this edge is not source or sink.
+                    edge.taint_args = tmp
+                
+                ssavar = edge.get_ssavars_to_taint()
+                
+                if type == 'sink':
+                    stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                    self.nodes[edge.start].tainted_vars_from_sink = stack_vars
+                    self.nodes[edge.start].global_vars.extend(global_vars)
+                    self.nodes[edge.start].heap_vars.extend(heap_vars)
+                elif type == 'source':
+                    stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+
+                    self.nodes[edge.start].tainted_vars_from_source = stack_vars
+                    self.nodes[edge.start].global_vars.extend(global_vars)
+                    self.nodes[edge.start].heap_vars.extend(heap_vars)
+
+                tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in stack_vars if arg.var.name.startswith('arg')]
+            
+            edge = backward_edges[-1]
+
+            if edge.taint_args is None:
+                # when this edge is not source or sink.
+                edge.taint_args = tmp
+
+            ssavar = edge.get_ssavars_to_taint()
+            
+            if type == 'sink':
+                stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                self.nodes[edge.start].tainted_vars_from_sink = stack_vars
+                self.nodes[edge.start].global_vars.extend(global_vars)
+                self.nodes[edge.start].heap_vars.extend(heap_vars)
+            elif type == 'source':
+                stack_vars, global_vars, heap_vars = self.get_related_vars_in_function_backward(function=edge.start, vars=ssavar)
+                stack_vars2, global_vars2, heap_vars2 = self.get_related_vars_in_function_forward(function=edge.start, vars=stack_vars)
+
+                self.nodes[edge.start].tainted_vars_from_source = stack_vars + stack_vars2
+                self.nodes[edge.start].global_vars.extend(global_vars + global_vars2)
+                self.nodes[edge.start].heap_vars.extend(heap_vars + heap_vars2)
+
+
+        # fill tainted variable to object by backward tainting
+        local_backward_tainting(type='source', path=path)
+        local_backward_tainting(type='sink', path=path)
+
+        # make head node
+        head_node = self.nodes.get(self.head_function)
+        self.head = head_node
+
+        # make graph
+        self.make_graph()
+
 
     def generate_linear_nodes(self, path: list[tuple]):
         logging.debug(f'The head node is a source function {self.head_function.name}')
@@ -163,11 +274,6 @@ class PathObject():
                 self.nodes[edge.start].heap_vars.extend(heap_vars + heap_vars2)
 
             tmp = [int(arg.var.name.split('arg')[1]) - 1 for arg in stack_vars if arg.var.name.startswith('arg')]
-
-    def generate_tree_nodes(self, source_path:list[tuple], sink_path:list[tuple]):
-        # TODO:
-        logging.debug(f'Head: {self.head_function.name}, Source: {self.source.start.name}, Sink: {self.sink.start.name}')
-        
 
     def get_related_vars_in_function_forward(self, function: Function, vars: list[SSAVariable]) -> tuple[list[SSAVariable], list[MediumLevelILConstPtr], list[SSAVariable]]:
         '''
@@ -424,7 +530,14 @@ class PathObject():
                 # TODO: return된 인자도 taint 리스트에 추가
 
                 #taint.append(def_ref)
-
+            elif track_var.operation == MediumLevelILOperation.MLIL_SET_VAR_ALIASED:
+                if type(track_var.next) == SSAVariable:
+                    taint_ssavar(track_var.next)
+                if type(track_var.prev) == SSAVariable:
+                    taint_ssavar(track_var.prev)
+                if track_var.src.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+                    taint_ssavar(track_var.src.src)
+                continue
         return (stack_vars, global_vars, heap_vars)
 
 
@@ -503,7 +616,7 @@ class PathObject():
         return controllable
 
     def get_path(self) -> str:
-        result = f'Full Path : '
+        result = f''
         if self.type == PathType.SINGLE_FUNCTION:
             result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
         elif self.type == PathType.LINEAR_NODES:
@@ -511,7 +624,11 @@ class PathObject():
             for _, end, _ in self.path:
                 result += f' -> ' + end.name if end.name is not None else f'{end.start:#x}'
         elif self.type == PathType.TREE_NODES:
-            result += 'Not Implemented yet!'
+            result += self.source.start.name if self.source.start.name is not None else f'{self.source.start.start:#x}'
+            for start, _, _ in self.path[0][::-1]:
+                result += f' -> ' + start.name if start.name is not None else f'{start.start:#x}'
+            for _, end, _ in self.path[1]:
+                result += f' -> ' + end.name if end.name is not None else f'{end.start:#x}'
         result += '\n'
         return result
 
@@ -539,11 +656,19 @@ class PathObject():
             result += f'{YELLOW}{self.sink}{END}'
 
         elif self.type == PathType.TREE_NODES:
-            result += self.head.function.name if self.head.function.name is not None else f'{self.head.function.start:#x}'
-            result += f'{END}\n'
-            result += f'SORRY NOT IMPLEMENTED YET!'
-            pass
+            result += self.get_path() + f'{END}\n'
+            result += f'head: ' + self.head_function.name if self.head_function.name is not None else f'{self.head_function.start:#x}'
+            result += f'{YELLOW}{self.source}{END}\n'
+            result += f'{GREEN}{self.nodes.get(self.source.start)}{END}\n'
 
+            for start, _, call_site in self.path[0][::-1]:
+                result += f'{YELLOW}{self.edges.get(call_site)}{END}\n'
+                result += f'{GREEN}{self.nodes.get(start)}{END}\n'
+            for _, end, call_site in self.path[1]:
+                result += f'{YELLOW}{self.edges.get(call_site)}{END}\n'
+                result += f'{GREEN}{self.nodes.get(end)}{END}\n'
+            result += f'{YELLOW}{self.sink}{END}\n'
+            
         result += '\n'
         print(result)
         
